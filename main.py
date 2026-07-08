@@ -20,9 +20,18 @@ app = Client("HostingManager", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_T
 
 DB_FILE = "database.json"
 
+# Initialize DB with default fields
 if not os.path.exists(DB_FILE):
     with open(DB_FILE, "w") as f:
-        json.dump({"users": {}, "banned": [], "locked": False, "vip": {}, "user_details": {}, "used_tokens": {}}, f)
+        json.dump({
+            "users": {},
+            "banned": [],
+            "locked": False,
+            "vip": {},
+            "user_details": {},
+            "used_tokens": {},
+            "security_enabled": True   # New global security flag
+        }, f)
 
 def load_db():
     with open(DB_FILE, "r") as f:
@@ -49,6 +58,7 @@ MALICIOUS_PATTERNS = [
 ]
 
 def scan_for_malicious(directory):
+    """Scan all files in directory for malicious patterns."""
     for root, _, files in os.walk(directory):
         for file in files:
             file_path = os.path.join(root, file)
@@ -223,6 +233,12 @@ def main_menu(user_id):
         btns.append([KeyboardButton("عرض الأعضاء VIP")])
         btns.append([KeyboardButton("المستخدمين"), KeyboardButton("حظر عضو")])
         btns.append([KeyboardButton("الغاء حظر عضو"), KeyboardButton("اذاعه لجميع الاعضاء")])
+        # Security toggle buttons
+        db = load_db()
+        if db.get("security_enabled", True):
+            btns.append([KeyboardButton("تعطيل نظام الحمايه")])
+        else:
+            btns.append([KeyboardButton("تفعيل نظام الحمايه")])
     else:
         btns.append([KeyboardButton("قسم الإدارة")])
     return ReplyKeyboardMarkup(btns, resize_keyboard=True)
@@ -291,6 +307,19 @@ async def handle_texts(client: Client, message: Message):
     state = user_states[user_id]
     step = state.get("step")
 
+    # Admin security toggle
+    if text in ["تعطيل نظام الحمايه", "تفعيل نظام الحمايه"] and user_id == ADMIN_ID:
+        if text == "تعطيل نظام الحمايه":
+            db["security_enabled"] = False
+            save_db(db)
+            await message.reply("🔒 **تم تعطيل نظام الحماية.** الآن يمكن رفع أي ملف (حتى المشبوه) بدون فحص.", reply_markup=main_menu(user_id))
+        else:
+            db["security_enabled"] = True
+            save_db(db)
+            await message.reply("🔓 **تم تفعيل نظام الحماية.** سيتم فحص الملفات المرفوعة ومنع الملفات الضارة.", reply_markup=main_menu(user_id))
+        user_states[user_id] = {"step": None}
+        return
+
     if text == "رجوع":
         user_states[user_id] = {"step": None, "target_id": None}
         return await message.reply("تم الرجوع للرئيسية.", reply_markup=main_menu(user_id))
@@ -350,7 +379,7 @@ async def handle_texts(client: Client, message: Message):
             bot_dir = f"{slot_dir}/bot"
             if os.path.exists(bot_dir):
                 token = find_bot_token_in_dir(bot_dir)
-            shutil.rmtree(slot_dir, ignore_errors=True)
+            # Stop the process if running
             process_key = f"{user_id}_{slot}"
             if process_key in running_bots:
                 try:
@@ -358,6 +387,9 @@ async def handle_texts(client: Client, message: Message):
                 except:
                     pass
                 del running_bots[process_key]
+            # Remove directory
+            shutil.rmtree(slot_dir, ignore_errors=True)
+            # Remove token tracking
             if token:
                 remove_used_token(token)
             else:
@@ -517,7 +549,6 @@ async def handle_texts(client: Client, message: Message):
                 bot_dir = f"{slot_dir}/bot"
                 if os.path.exists(bot_dir):
                     token = find_bot_token_in_dir(bot_dir)
-                shutil.rmtree(slot_dir, ignore_errors=True)
                 process_key = f"{user_id}_{slot}"
                 if process_key in running_bots:
                     try:
@@ -525,6 +556,7 @@ async def handle_texts(client: Client, message: Message):
                     except:
                         pass
                     del running_bots[process_key]
+                shutil.rmtree(slot_dir, ignore_errors=True)
                 if token:
                     remove_used_token(token)
                 else:
@@ -997,7 +1029,10 @@ async def handle_docs(client: Client, message: Message):
             state["step"] = None
             return await msg.edit_text("❌ فشل: الملف المرفوع لا يحتوي على ملف بايثون (.py).\nتم مسح الملفات فوراً من السيرفر لتوفير المساحة.")
 
-        if scan_for_malicious(bot_dir):
+        # Check security status
+        db = load_db()
+        security_enabled = db.get("security_enabled", True)
+        if security_enabled and scan_for_malicious(bot_dir):
             shutil.rmtree(f"hostings/{user_id}/slot_{slot}", ignore_errors=True)
             state["step"] = None
             return await msg.edit_text("❌ تم رفض الملف لاحتوائه على أكواد ضارة أو محاولة اختراق.")
