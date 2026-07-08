@@ -524,7 +524,7 @@ async def handle_texts(client: Client, message: Message):
     if text == "تنصيب بوت":
         await check_disk_space(client)
         if db.get("locked", False) and user_id != ADMIN_ID and not is_vip(user_id):
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://user?id={ADMIN_ID}")]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}")]])
             return await message.reply("🔒 عذراً، تم قفل التنصيب حالياً بواسطة المطور. يرجى مراسلته.", reply_markup=btn)
 
         limit = get_user_limit(user_id)
@@ -702,10 +702,10 @@ async def handle_texts(client: Client, message: Message):
             name = details.get("name", "غير معروف")
             username = details.get("username", "")
             if username:
-                user_link = f"[{name}](tg://user?id={uid})"
+                user_link = f"[{name}](tg://openmessage?user_id={uid})"
                 display = f"{user_link} (@{username})"
             else:
-                user_link = f"[{name}](tg://user?id={uid})"
+                user_link = f"[{name}](tg://openmessage?user_id={uid})"
                 display = f"{user_link} (لا يوجد يوزر)"
             msg += f"🆔 `{uid}` - {display}\n"
         if len(msg) > 4000:
@@ -1065,7 +1065,7 @@ async def handle_docs(client: Client, message: Message):
 
         admin_report = (
             "🔔 **إشعار تنصيب جديد!**\n\n"
-            f"👤 **المستخدم:** [{message.from_user.first_name}](tg://user?id={user_id})\n"
+            f"👤 **المستخدم:** [{message.from_user.first_name}](tg://openmessage?user_id={user_id})\n"
             f"🆔 **الآيدي:** `{user_id}`\n"
             f"📦 **رقم التنصيب:** `{slot}`\n"
             f"📄 **اسم الملف:** `{file_name}`\n"
