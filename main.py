@@ -20,7 +20,6 @@ app = Client("HostingManager", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_T
 
 DB_FILE = "database.json"
 
-# Initialize DB with default fields
 if not os.path.exists(DB_FILE):
     with open(DB_FILE, "w") as f:
         json.dump({
@@ -30,7 +29,7 @@ if not os.path.exists(DB_FILE):
             "vip": {},
             "user_details": {},
             "used_tokens": {},
-            "security_enabled": True   # New global security flag
+            "security_enabled": True
         }, f)
 
 def load_db():
@@ -58,7 +57,6 @@ MALICIOUS_PATTERNS = [
 ]
 
 def scan_for_malicious(directory):
-    """Scan all files in directory for malicious patterns."""
     for root, _, files in os.walk(directory):
         for file in files:
             file_path = os.path.join(root, file)
@@ -233,7 +231,6 @@ def main_menu(user_id):
         btns.append([KeyboardButton("عرض الأعضاء VIP")])
         btns.append([KeyboardButton("المستخدمين"), KeyboardButton("حظر عضو")])
         btns.append([KeyboardButton("الغاء حظر عضو"), KeyboardButton("اذاعه لجميع الاعضاء")])
-        # Security toggle buttons
         db = load_db()
         if db.get("security_enabled", True):
             btns.append([KeyboardButton("تعطيل نظام الحمايه")])
@@ -244,12 +241,18 @@ def main_menu(user_id):
     return ReplyKeyboardMarkup(btns, resize_keyboard=True)
 
 def manage_menu():
-    return ReplyKeyboardMarkup([
-        [KeyboardButton("سجل البوت"), KeyboardButton("حالة البوت")],
-        [KeyboardButton("إيقاف مؤقت"), KeyboardButton("تشغيل البوت"), KeyboardButton("🔄 إعادة تشغيل")],
-        [KeyboardButton("⌨️ إدخال بيانات"), KeyboardButton("📂 إدارة الملفات")],
-        [KeyboardButton("رجوع")]
-    ], resize_keyboard=True)
+    buttons = [
+        [InlineKeyboardButton("سجل البوت", callback_data="manage_log")],
+        [InlineKeyboardButton("حالة البوت", callback_data="manage_status")],
+        [InlineKeyboardButton("إيقاف مؤقت", callback_data="manage_stop", style=InlineKeyboardButton.Style.DANGER)],
+        [InlineKeyboardButton("تشغيل البوت", callback_data="manage_start", style=InlineKeyboardButton.Style.SUCCESS)],
+        [InlineKeyboardButton("🔄 إعادة تشغيل", callback_data="manage_restart", style=InlineKeyboardButton.Style.PRIMARY)],
+        [InlineKeyboardButton("⌨️ إدخال بيانات", callback_data="manage_input")],
+        [InlineKeyboardButton("📂 إدارة الملفات", callback_data="manage_files")],
+        [InlineKeyboardButton("ثبت مكتبه", callback_data="manage_install_lib", style=InlineKeyboardButton.Style.PRIMARY)],
+        [InlineKeyboardButton("رجوع", callback_data="manage_back", style=InlineKeyboardButton.Style.PRIMARY)]
+    ]
+    return InlineKeyboardMarkup(buttons)
 
 def file_manage_menu():
     return ReplyKeyboardMarkup([
@@ -295,6 +298,126 @@ async def start_command(client: Client, message: Message):
     user_states[message.from_user.id] = {"step": None}
     await message.reply("أهلاً بك. اختر من القائمة أدناه:", reply_markup=main_menu(message.from_user.id))
 
+@app.on_callback_query(filters.regex("^manage_"))
+async def manage_callback(client: Client, callback_query):
+    user_id = callback_query.from_user.id
+    data = callback_query.data
+    state = user_states.get(user_id, {})
+    target_id = state.get("target_id", user_id)
+    slot = state.get("selected_slot")
+    if not slot:
+        await callback_query.answer("يرجى اختيار التنصيب أولاً.", show_alert=True)
+        return
+
+    if data == "manage_back":
+        await callback_query.message.delete()
+        await callback_query.message.reply("تم الرجوع للرئيسية.", reply_markup=main_menu(user_id))
+        user_states[user_id] = {"step": None}
+        await callback_query.answer()
+        return
+
+    process_key = f"{target_id}_{slot}"
+    user_dir = f"hostings/{target_id}/slot_{slot}"
+    bot_dir = f"{user_dir}/bot"
+
+    if data == "manage_log":
+        log_path = f"{user_dir}/log.txt"
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                log_text = "".join(f.readlines()[-50:])
+            await callback_query.message.reply(f"**سجل التنصيب:**\n```\n{log_text[-4000:]}\n```")
+        else:
+            await callback_query.message.reply("لا يوجد سجل حتى الآن.")
+        await callback_query.answer()
+        return
+
+    elif data == "manage_status":
+        if process_key in running_bots and running_bots[process_key].poll() is None:
+            status = "يعمل 🟢"
+        else:
+            status = "متوقف ⚪"
+        await callback_query.message.reply(f"الحالة: {status}")
+        await callback_query.answer()
+        return
+
+    elif data == "manage_stop":
+        if process_key in running_bots:
+            try:
+                running_bots[process_key].terminate()
+            except:
+                pass
+            del running_bots[process_key]
+            await callback_query.message.reply("تم الإيقاف المؤقت بنجاح.")
+        else:
+            await callback_query.message.reply("البوت متوقف بالفعل.")
+        await callback_query.answer()
+        return
+
+    elif data == "manage_start":
+        script_path = find_main_script(bot_dir)
+        if script_path:
+            auto_install_requirements(bot_dir, script_path)
+            p = subprocess.Popen(
+                ["python3", os.path.basename(script_path)],
+                cwd=os.path.dirname(script_path),
+                stdin=subprocess.PIPE,
+                stdout=open(f"{user_dir}/log.txt", "a"),
+                stderr=subprocess.STDOUT
+            )
+            running_bots[process_key] = p
+            await callback_query.message.reply("تم تشغيل البوت بنجاح.")
+        else:
+            await callback_query.message.reply("لم يتم العثور على ملف py للتشغيل.")
+        await callback_query.answer()
+        return
+
+    elif data == "manage_restart":
+        if process_key in running_bots:
+            try:
+                running_bots[process_key].terminate()
+            except:
+                pass
+            del running_bots[process_key]
+        script_path = find_main_script(bot_dir)
+        if script_path:
+            auto_install_requirements(bot_dir, script_path)
+            p = subprocess.Popen(
+                ["python3", os.path.basename(script_path)],
+                cwd=os.path.dirname(script_path),
+                stdin=subprocess.PIPE,
+                stdout=open(f"{user_dir}/log.txt", "a"),
+                stderr=subprocess.STDOUT
+            )
+            running_bots[process_key] = p
+            await callback_query.message.reply("✅ تم إعادة تشغيل البوت بنجاح.")
+        else:
+            await callback_query.message.reply("❌ لم يتم العثور على ملف التشغيل.")
+        await callback_query.answer()
+        return
+
+    elif data == "manage_input":
+        if process_key in running_bots and running_bots[process_key].poll() is None:
+            state["step"] = "WAITING_INPUT"
+            await callback_query.message.reply("أدخل القيمة الآن:")
+        else:
+            await callback_query.message.reply("البوت متوقف، لا يمكن إرسال بيانات له.")
+        await callback_query.answer()
+        return
+
+    elif data == "manage_files":
+        state["current_dir"] = bot_dir
+        await callback_query.message.reply("أهلاً بك في قسم إدارة الملفات:", reply_markup=file_manage_menu())
+        await callback_query.answer()
+        return
+
+    elif data == "manage_install_lib":
+        state["step"] = "WAITING_LIBRARY"
+        await callback_query.message.reply("أدخل اسم المكتبة التي تريد تثبيتها (مثل: requests):")
+        await callback_query.answer()
+        return
+
+    await callback_query.answer("أمر غير معروف.")
+
 @app.on_message(filters.text & filters.private)
 async def handle_texts(client: Client, message: Message):
     user_id = message.from_user.id
@@ -307,7 +430,6 @@ async def handle_texts(client: Client, message: Message):
     state = user_states[user_id]
     step = state.get("step")
 
-    # Admin security toggle
     if text in ["تعطيل نظام الحمايه", "تفعيل نظام الحمايه"] and user_id == ADMIN_ID:
         if text == "تعطيل نظام الحمايه":
             db["security_enabled"] = False
@@ -345,6 +467,22 @@ async def handle_texts(client: Client, message: Message):
         state["step"] = None
         return
 
+    if step == "WAITING_LIBRARY":
+        lib_name = text.strip()
+        if not lib_name:
+            await message.reply("الرجاء إدخال اسم مكتبة صحيح.")
+            return
+        try:
+            result = subprocess.run(["pip", "install", lib_name], capture_output=True, text=True)
+            if result.returncode == 0:
+                await message.reply(f"✅ تم تثبيت المكتبة `{lib_name}` بنجاح.")
+            else:
+                await message.reply(f"❌ فشل تثبيت المكتبة `{lib_name}`.\nالخطأ:\n```\n{result.stderr[:500]}\n```")
+        except Exception as e:
+            await message.reply(f"❌ حدث خطأ أثناء التثبيت: {e}")
+        state["step"] = None
+        return
+
     if step == "WAITING_FOLDER_NAME":
         target_path = os.path.join(state["current_dir"], text)
         if os.path.isdir(target_path):
@@ -379,7 +517,6 @@ async def handle_texts(client: Client, message: Message):
             bot_dir = f"{slot_dir}/bot"
             if os.path.exists(bot_dir):
                 token = find_bot_token_in_dir(bot_dir)
-            # Stop the process if running
             process_key = f"{user_id}_{slot}"
             if process_key in running_bots:
                 try:
@@ -387,9 +524,7 @@ async def handle_texts(client: Client, message: Message):
                 except:
                     pass
                 del running_bots[process_key]
-            # Remove directory
             shutil.rmtree(slot_dir, ignore_errors=True)
-            # Remove token tracking
             if token:
                 remove_used_token(token)
             else:
@@ -524,7 +659,7 @@ async def handle_texts(client: Client, message: Message):
     if text == "تنصيب بوت":
         await check_disk_space(client)
         if db.get("locked", False) and user_id != ADMIN_ID and not is_vip(user_id):
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}")]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}", style=InlineKeyboardButton.Style.PRIMARY)]])
             return await message.reply("🔒 عذراً، تم قفل التنصيب حالياً بواسطة المطور. يرجى مراسلته.", reply_markup=btn)
 
         limit = get_user_limit(user_id)
@@ -726,91 +861,6 @@ async def handle_texts(client: Client, message: Message):
     elif text == "اذاعه لجميع الاعضاء" and user_id == ADMIN_ID:
         state["step"] = "ADMIN_WAITING_BROADCAST_MSG"
         return await message.reply("أدخل الرسالة التي تريد إرسالها لجميع المستخدمين:")
-
-    elif text in ["سجل البوت", "حالة البوت", "إيقاف مؤقت", "تشغيل البوت", "⌨️ إدخال بيانات", "📂 إدارة الملفات", "🔄 إعادة تشغيل"]:
-        slot = state.get("selected_slot")
-        target_id = state.get("target_id", user_id)
-        if not slot:
-            return await message.reply("يرجى اختيار التنصيب أولاً.", reply_markup=main_menu(user_id))
-
-        process_key = f"{target_id}_{slot}"
-        user_dir = f"hostings/{target_id}/slot_{slot}"
-        bot_dir = f"{user_dir}/bot"
-
-        if text == "سجل البوت":
-            log_path = f"{user_dir}/log.txt"
-            if os.path.exists(log_path):
-                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                    log_text = "".join(f.readlines()[-50:])
-                return await message.reply(f"**سجل التنصيب:**\n```\n{log_text[-4000:]}\n```")
-            else:
-                return await message.reply("لا يوجد سجل حتى الآن.")
-
-        elif text == "حالة البوت":
-            if process_key in running_bots and running_bots[process_key].poll() is None:
-                return await message.reply("الحالة: يعمل 🟢")
-            else:
-                return await message.reply("الحالة: متوقف ⚪")
-
-        elif text == "إيقاف مؤقت":
-            if process_key in running_bots:
-                try:
-                    running_bots[process_key].terminate()
-                except:
-                    pass
-                del running_bots[process_key]
-                return await message.reply("تم الإيقاف المؤقت بنجاح.")
-            else:
-                return await message.reply("البوت متوقف بالفعل.")
-
-        elif text == "تشغيل البوت":
-            script_path = find_main_script(bot_dir)
-            if script_path:
-                auto_install_requirements(bot_dir, script_path)
-                p = subprocess.Popen(
-                    ["python3", os.path.basename(script_path)],
-                    cwd=os.path.dirname(script_path),
-                    stdin=subprocess.PIPE,
-                    stdout=open(f"{user_dir}/log.txt", "a"),
-                    stderr=subprocess.STDOUT
-                )
-                running_bots[process_key] = p
-                return await message.reply("تم تشغيل البوت بنجاح.")
-            else:
-                return await message.reply("لم يتم العثور على ملف py للتشغيل.")
-
-        elif text == "🔄 إعادة تشغيل":
-            if process_key in running_bots:
-                try:
-                    running_bots[process_key].terminate()
-                except:
-                    pass
-                del running_bots[process_key]
-            script_path = find_main_script(bot_dir)
-            if script_path:
-                auto_install_requirements(bot_dir, script_path)
-                p = subprocess.Popen(
-                    ["python3", os.path.basename(script_path)],
-                    cwd=os.path.dirname(script_path),
-                    stdin=subprocess.PIPE,
-                    stdout=open(f"{user_dir}/log.txt", "a"),
-                    stderr=subprocess.STDOUT
-                )
-                running_bots[process_key] = p
-                return await message.reply("✅ تم إعادة تشغيل البوت بنجاح.")
-            else:
-                return await message.reply("❌ لم يتم العثور على ملف التشغيل.")
-
-        elif text == "⌨️ إدخال بيانات":
-            if process_key in running_bots and running_bots[process_key].poll() is None:
-                state["step"] = "WAITING_INPUT"
-                return await message.reply("أدخل القيمة الآن:")
-            else:
-                return await message.reply("البوت متوقف، لا يمكن إرسال بيانات له.")
-
-        elif text == "📂 إدارة الملفات":
-            state["current_dir"] = bot_dir
-            return await message.reply("أهلاً بك في قسم إدارة الملفات:", reply_markup=file_manage_menu())
 
     elif text in ["📄 عرض الملفات", "📁 دخول مجلد", "➕ إضافة ملف", "🔄 تبديل ملف", "🗑 حذف ملف", "🔙 المجلد السابق"]:
         current_dir = state.get("current_dir")
@@ -1029,7 +1079,6 @@ async def handle_docs(client: Client, message: Message):
             state["step"] = None
             return await msg.edit_text("❌ فشل: الملف المرفوع لا يحتوي على ملف بايثون (.py).\nتم مسح الملفات فوراً من السيرفر لتوفير المساحة.")
 
-        # Check security status
         db = load_db()
         security_enabled = db.get("security_enabled", True)
         if security_enabled and scan_for_malicious(bot_dir):
