@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timedelta
 from pyrogram import Client, filters
 from pyrogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from pyrogram.enums import ButtonStyle
 
 API_ID = 24217199
 API_HASH = "11c12a66dbd23da592211771db1bce6b"
@@ -223,70 +224,70 @@ def remove_user_tokens(user_id, slot=None):
 def main_menu(user_id):
     buttons = []
     if user_id == ADMIN_ID:
-        buttons.append([InlineKeyboardButton("تنصيب بوت", callback_data="install_bot", style=InlineKeyboardButton.Style.PRIMARY),
-                        InlineKeyboardButton("حذف تنصيب", callback_data="delete_install", style=InlineKeyboardButton.Style.DANGER)])
-        buttons.append([InlineKeyboardButton("إدارة بوتك", callback_data="manage_my_bot", style=InlineKeyboardButton.Style.PRIMARY),
-                        InlineKeyboardButton("إدارة بوتات الأعضاء", callback_data="manage_users_bots", style=InlineKeyboardButton.Style.PRIMARY)])
-        buttons.append([InlineKeyboardButton("قفل التنصيب", callback_data="lock_install", style=InlineKeyboardButton.Style.DANGER),
-                        InlineKeyboardButton("تشغيل التنصيب", callback_data="unlock_install", style=InlineKeyboardButton.Style.SUCCESS)])
-        buttons.append([InlineKeyboardButton("جلب نسخة احتياطية", callback_data="backup_get", style=InlineKeyboardButton.Style.PRIMARY),
-                        InlineKeyboardButton("رفع نسخة احتياطية", callback_data="backup_upload", style=InlineKeyboardButton.Style.PRIMARY)])
-        buttons.append([InlineKeyboardButton("الإحصائيات والتقرير", callback_data="stats", style=InlineKeyboardButton.Style.PRIMARY),
-                        InlineKeyboardButton("المنصبين", callback_data="list_installs", style=InlineKeyboardButton.Style.PRIMARY)])
-        buttons.append([InlineKeyboardButton("رفع عضو VIP", callback_data="vip_add", style=InlineKeyboardButton.Style.SUCCESS),
-                        InlineKeyboardButton("تنزيل عضو VIP", callback_data="vip_remove", style=InlineKeyboardButton.Style.DANGER)])
-        buttons.append([InlineKeyboardButton("عرض الأعضاء VIP", callback_data="vip_list", style=InlineKeyboardButton.Style.PRIMARY)])
-        buttons.append([InlineKeyboardButton("المستخدمين", callback_data="users_list", style=InlineKeyboardButton.Style.PRIMARY),
-                        InlineKeyboardButton("حظر عضو", callback_data="ban_user", style=InlineKeyboardButton.Style.DANGER)])
-        buttons.append([InlineKeyboardButton("الغاء حظر عضو", callback_data="unban_user", style=InlineKeyboardButton.Style.SUCCESS),
-                        InlineKeyboardButton("اذاعه لجميع الاعضاء", callback_data="broadcast", style=InlineKeyboardButton.Style.PRIMARY)])
+        buttons.append([InlineKeyboardButton("تنصيب بوت", callback_data="install_bot", style=ButtonStyle.PRIMARY),
+                        InlineKeyboardButton("حذف تنصيب", callback_data="delete_install", style=ButtonStyle.DANGER)])
+        buttons.append([InlineKeyboardButton("إدارة بوتك", callback_data="manage_my_bot", style=ButtonStyle.PRIMARY),
+                        InlineKeyboardButton("إدارة بوتات الأعضاء", callback_data="manage_users_bots", style=ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton("قفل التنصيب", callback_data="lock_install", style=ButtonStyle.DANGER),
+                        InlineKeyboardButton("تشغيل التنصيب", callback_data="unlock_install", style=ButtonStyle.SUCCESS)])
+        buttons.append([InlineKeyboardButton("جلب نسخة احتياطية", callback_data="backup_get", style=ButtonStyle.PRIMARY),
+                        InlineKeyboardButton("رفع نسخة احتياطية", callback_data="backup_upload", style=ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton("الإحصائيات والتقرير", callback_data="stats", style=ButtonStyle.PRIMARY),
+                        InlineKeyboardButton("المنصبين", callback_data="list_installs", style=ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton("رفع عضو VIP", callback_data="vip_add", style=ButtonStyle.SUCCESS),
+                        InlineKeyboardButton("تنزيل عضو VIP", callback_data="vip_remove", style=ButtonStyle.DANGER)])
+        buttons.append([InlineKeyboardButton("عرض الأعضاء VIP", callback_data="vip_list", style=ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton("المستخدمين", callback_data="users_list", style=ButtonStyle.PRIMARY),
+                        InlineKeyboardButton("حظر عضو", callback_data="ban_user", style=ButtonStyle.DANGER)])
+        buttons.append([InlineKeyboardButton("الغاء حظر عضو", callback_data="unban_user", style=ButtonStyle.SUCCESS),
+                        InlineKeyboardButton("اذاعه لجميع الاعضاء", callback_data="broadcast", style=ButtonStyle.PRIMARY)])
         db = load_db()
         if db.get("security_enabled", True):
-            buttons.append([InlineKeyboardButton("تعطيل نظام الحمايه", callback_data="disable_security", style=InlineKeyboardButton.Style.DANGER)])
+            buttons.append([InlineKeyboardButton("تعطيل نظام الحمايه", callback_data="disable_security", style=ButtonStyle.DANGER)])
         else:
-            buttons.append([InlineKeyboardButton("تفعيل نظام الحمايه", callback_data="enable_security", style=InlineKeyboardButton.Style.SUCCESS)])
+            buttons.append([InlineKeyboardButton("تفعيل نظام الحمايه", callback_data="enable_security", style=ButtonStyle.SUCCESS)])
     else:
-        buttons.append([InlineKeyboardButton("تنصيب بوت", callback_data="install_bot", style=InlineKeyboardButton.Style.PRIMARY),
-                        InlineKeyboardButton("حذف تنصيب", callback_data="delete_install", style=InlineKeyboardButton.Style.DANGER)])
-        buttons.append([InlineKeyboardButton("إدارة بوتك", callback_data="manage_my_bot", style=InlineKeyboardButton.Style.PRIMARY)])
+        buttons.append([InlineKeyboardButton("تنصيب بوت", callback_data="install_bot", style=ButtonStyle.PRIMARY),
+                        InlineKeyboardButton("حذف تنصيب", callback_data="delete_install", style=ButtonStyle.DANGER)])
+        buttons.append([InlineKeyboardButton("إدارة بوتك", callback_data="manage_my_bot", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 def manage_menu():
     buttons = [
-        [InlineKeyboardButton("سجل البوت", callback_data="manage_log", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("حالة البوت", callback_data="manage_status", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("إيقاف مؤقت", callback_data="manage_stop", style=InlineKeyboardButton.Style.DANGER)],
-        [InlineKeyboardButton("تشغيل البوت", callback_data="manage_start", style=InlineKeyboardButton.Style.SUCCESS)],
-        [InlineKeyboardButton("🔄 إعادة تشغيل", callback_data="manage_restart", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("⌨️ إدخال بيانات", callback_data="manage_input", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("📂 إدارة الملفات", callback_data="manage_files", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("ثبت مكتبه", callback_data="manage_install_lib", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("رجوع", callback_data="manage_back", style=InlineKeyboardButton.Style.PRIMARY)]
+        [InlineKeyboardButton("سجل البوت", callback_data="manage_log", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("حالة البوت", callback_data="manage_status", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("إيقاف مؤقت", callback_data="manage_stop", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton("تشغيل البوت", callback_data="manage_start", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🔄 إعادة تشغيل", callback_data="manage_restart", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("⌨️ إدخال بيانات", callback_data="manage_input", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("📂 إدارة الملفات", callback_data="manage_files", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("ثبت مكتبه", callback_data="manage_install_lib", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("رجوع", callback_data="manage_back", style=ButtonStyle.PRIMARY)]
     ]
     return InlineKeyboardMarkup(buttons)
 
 def file_manage_menu():
     buttons = [
-        [InlineKeyboardButton("📄 عرض الملفات", callback_data="file_list", style=InlineKeyboardButton.Style.PRIMARY),
-         InlineKeyboardButton("📁 دخول مجلد", callback_data="file_enter", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("➕ إضافة ملف", callback_data="file_add", style=InlineKeyboardButton.Style.SUCCESS),
-         InlineKeyboardButton("🔄 تبديل ملف", callback_data="file_replace", style=InlineKeyboardButton.Style.PRIMARY),
-         InlineKeyboardButton("🗑 حذف ملف", callback_data="file_delete", style=InlineKeyboardButton.Style.DANGER)],
-        [InlineKeyboardButton("🔄 إعادة تشغيل", callback_data="file_restart", style=InlineKeyboardButton.Style.PRIMARY),
-         InlineKeyboardButton("🔙 المجلد السابق", callback_data="file_back", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("الرجوع لإدارة البوت", callback_data="file_return_manage", style=InlineKeyboardButton.Style.PRIMARY)]
+        [InlineKeyboardButton("📄 عرض الملفات", callback_data="file_list", style=ButtonStyle.PRIMARY),
+         InlineKeyboardButton("📁 دخول مجلد", callback_data="file_enter", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("➕ إضافة ملف", callback_data="file_add", style=ButtonStyle.SUCCESS),
+         InlineKeyboardButton("🔄 تبديل ملف", callback_data="file_replace", style=ButtonStyle.PRIMARY),
+         InlineKeyboardButton("🗑 حذف ملف", callback_data="file_delete", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton("🔄 إعادة تشغيل", callback_data="file_restart", style=ButtonStyle.PRIMARY),
+         InlineKeyboardButton("🔙 المجلد السابق", callback_data="file_back", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("الرجوع لإدارة البوت", callback_data="file_return_manage", style=ButtonStyle.PRIMARY)]
     ]
     return InlineKeyboardMarkup(buttons)
 
 def admin_users_menu():
     buttons = [
-        [InlineKeyboardButton("إدارة تنصيب عضو", callback_data="admin_manage_user_install", style=InlineKeyboardButton.Style.PRIMARY),
-         InlineKeyboardButton("حذف تنصيب عضو", callback_data="admin_delete_user_install", style=InlineKeyboardButton.Style.DANGER)],
-        [InlineKeyboardButton("إيقاف مؤقت لعضو", callback_data="admin_stop_user", style=InlineKeyboardButton.Style.DANGER),
-         InlineKeyboardButton("تشغيل لعضو", callback_data="admin_start_user", style=InlineKeyboardButton.Style.SUCCESS)],
-        [InlineKeyboardButton("فك حظر", callback_data="admin_unban", style=InlineKeyboardButton.Style.SUCCESS),
-         InlineKeyboardButton("زيادة تنصيب", callback_data="admin_add_limit", style=InlineKeyboardButton.Style.PRIMARY)],
-        [InlineKeyboardButton("رجوع", callback_data="admin_back", style=InlineKeyboardButton.Style.PRIMARY)]
+        [InlineKeyboardButton("إدارة تنصيب عضو", callback_data="admin_manage_user_install", style=ButtonStyle.PRIMARY),
+         InlineKeyboardButton("حذف تنصيب عضو", callback_data="admin_delete_user_install", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton("إيقاف مؤقت لعضو", callback_data="admin_stop_user", style=ButtonStyle.DANGER),
+         InlineKeyboardButton("تشغيل لعضو", callback_data="admin_start_user", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("فك حظر", callback_data="admin_unban", style=ButtonStyle.SUCCESS),
+         InlineKeyboardButton("زيادة تنصيب", callback_data="admin_add_limit", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("رجوع", callback_data="admin_back", style=ButtonStyle.PRIMARY)]
     ]
     return InlineKeyboardMarkup(buttons)
 
@@ -330,12 +331,11 @@ async def callback_handler(client: Client, callback_query: CallbackQuery):
         user_states[user_id] = {"step": None}
     state = user_states[user_id]
 
-    # Handle main menu callbacks
     if data == "install_bot":
         await callback_query.answer()
         await check_disk_space(client)
         if db.get("locked", False) and user_id != ADMIN_ID and not is_vip(user_id):
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}", style=InlineKeyboardButton.Style.PRIMARY)]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}", style=ButtonStyle.PRIMARY)]])
             await callback_query.message.reply("🔒 عذراً، تم قفل التنصيب حالياً بواسطة المطور. يرجى مراسلته.", reply_markup=btn)
             return
 
@@ -578,7 +578,6 @@ async def callback_handler(client: Client, callback_query: CallbackQuery):
             await callback_query.message.reply("🔓 **تم تفعيل نظام الحماية.** سيتم فحص الملفات المرفوعة ومنع الملفات الضارة.", reply_markup=main_menu(user_id))
         return
 
-    # Admin users management callbacks
     elif data.startswith("admin_"):
         if user_id != ADMIN_ID:
             await callback_query.answer("ليس لديك صلاحية.", show_alert=True)
@@ -611,9 +610,7 @@ async def callback_handler(client: Client, callback_query: CallbackQuery):
             await callback_query.message.reply("القائمة الرئيسية:", reply_markup=main_menu(user_id))
         return
 
-    # Manage menu callbacks
     elif data.startswith("manage_"):
-        # Check if slot selected
         target_id = state.get("target_id", user_id)
         slot = state.get("selected_slot")
         if not slot:
@@ -730,7 +727,6 @@ async def callback_handler(client: Client, callback_query: CallbackQuery):
         await callback_query.answer("أمر غير معروف.")
         return
 
-    # File management callbacks
     elif data.startswith("file_"):
         current_dir = state.get("current_dir")
         if not current_dir or not os.path.exists(current_dir):
@@ -792,7 +788,6 @@ async def callback_handler(client: Client, callback_query: CallbackQuery):
             return
 
         elif data == "file_restart":
-            # Restart bot from file manager
             process_key = f"{target_id}_{slot}"
             bot_dir = f"hostings/{target_id}/slot_{slot}/bot"
             if process_key in running_bots:
