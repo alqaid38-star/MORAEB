@@ -342,29 +342,52 @@ async def handle_texts(client: Client, message: Message):
         state["step"] = None
         return
 
-    if step == "WAITING_LIBRARY_NAME":
-        lib_name = text.strip()
-        if not lib_name:
-            return await message.reply("الرجاء إدخال اسم مكتبة صحيح.")
+    # New step for executing arbitrary commands
+    if step == "WAITING_COMMAND":
+        command = text.strip()
+        if not command:
+            return await message.reply("الرجاء إدخال أمر صحيح.")
+
         slot = state.get("selected_slot")
         target_id = state.get("target_id", user_id)
         if not slot or not target_id:
             state["step"] = None
             return await message.reply("حدث خطأ في الجلسة، أعد المحاولة.")
+
         bot_dir = f"hostings/{target_id}/slot_{slot}/bot"
         if not os.path.exists(bot_dir):
             state["step"] = None
             return await message.reply("المجلد غير موجود، قد يكون التنصيب محذوفاً.")
+
+        await message.reply(f"⏳ جاري تنفيذ الأمر:\n`{command}`")
+
         try:
-            result = subprocess.run(["pip", "install", lib_name], capture_output=True, text=True, timeout=120)
+            # Run command in the bot's directory
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=bot_dir,
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            output = result.stdout
+            error = result.stderr
             if result.returncode == 0:
-                await message.reply(f"✅ تم تثبيت المكتبة `{lib_name}` بنجاح.\n\nالإخراج:\n```\n{result.stdout[-1000:]}\n```")
+                reply = f"✅ **تم تنفيذ الأمر بنجاح.**\n\n**الإخراج:**\n```\n{output[-2000:]}\n```"
+                if error:
+                    reply += f"\n\n**تحذير (stderr):**\n```\n{error[-500:]}\n```"
+                await message.reply(reply)
             else:
-                await message.reply(f"❌ فشل تثبيت المكتبة `{lib_name}`.\n\nالخطأ:\n```\n{result.stderr[-1000:]}\n```")
+                reply = f"❌ **فشل تنفيذ الأمر.**\n\n**الخطأ:**\n```\n{error[-2000:]}\n```"
+                if output:
+                    reply += f"\n\n**الإخراج:**\n```\n{output[-500:]}\n```"
+                await message.reply(reply)
         except subprocess.TimeoutExpired:
-            await message.reply("⏰ انتهى الوقت المحدد للتثبيت. قد تكون المكتبة كبيرة أو هناك مشكلة في الاتصال.")
+            await message.reply("⏰ انتهى الوقت المحدد لتنفيذ الأمر (300 ثانية). قد يكون الأمر طويلاً.")
         except Exception as e:
-            await message.reply(f"❌ حدث خطأ أثناء التثبيت: {e}")
+            await message.reply(f"❌ حدث خطأ أثناء تنفيذ الأمر: {e}")
+
         state["step"] = None
         return
 
@@ -752,10 +775,10 @@ async def handle_texts(client: Client, message: Message):
         target_id = state.get("target_id", user_id)
         if not slot:
             return await message.reply("يرجى اختيار التنصيب أولاً.", reply_markup=main_menu(user_id))
-        state["step"] = "WAITING_LIBRARY_NAME"
+        state["step"] = "WAITING_COMMAND"
         state["target_id"] = target_id
         state["selected_slot"] = slot
-        return await message.reply("أدخل اسم المكتبة التي تريد تثبيتها (مثل: requests):")
+        return await message.reply("أدخل الأمر الذي تريد تنفيذه (مثل: `pip install requests` أو `pip install -r requirements.txt`):")
 
     elif text in ["سجل البوت", "حالة البوت", "إيقاف مؤقت", "تشغيل البوت", "⌨️ إدخال بيانات", "📂 إدارة الملفات", "🔄 إعادة تشغيل"]:
         slot = state.get("selected_slot")
