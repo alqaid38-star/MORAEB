@@ -231,6 +231,9 @@ def main_menu(user_id):
         btns.append([KeyboardButton("عرض الأعضاء VIP")])
         btns.append([KeyboardButton("المستخدمين"), KeyboardButton("حظر عضو")])
         btns.append([KeyboardButton("الغاء حظر عضو"), KeyboardButton("اذاعه لجميع الاعضاء")])
+        btns.append([KeyboardButton("عرض الاسكرينات"), KeyboardButton("ايقاف اسكرين")])
+        btns.append([KeyboardButton("ايقاف جميع الاسكرينات")])
+        btns.append([KeyboardButton("قسم الجذر")])
         db = load_db()
         if db.get("security_enabled", True):
             btns.append([KeyboardButton("تعطيل نظام الحمايه")])
@@ -262,6 +265,13 @@ def admin_users_menu():
         [KeyboardButton("إدارة تنصيب عضو"), KeyboardButton("حذف تنصيب عضو")],
         [KeyboardButton("إيقاف مؤقت لعضو"), KeyboardButton("تشغيل لعضو")],
         [KeyboardButton("فك حظر"), KeyboardButton("زيادة تنصيب")],
+        [KeyboardButton("رجوع")]
+    ], resize_keyboard=True)
+
+def root_menu():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("انشاء فولدر"), KeyboardButton("تنصيب ملف")],
+        [KeyboardButton("عرض ملفات الجذر"), KeyboardButton("حذف ملف/مجلد")],
         [KeyboardButton("رجوع")]
     ], resize_keyboard=True)
 
@@ -305,6 +315,139 @@ async def handle_texts(client: Client, message: Message):
     state = user_states[user_id]
     step = state.get("step")
 
+    # Handle root menu
+    if text == "قسم الجذر" and user_id == ADMIN_ID:
+        state["step"] = "ROOT_MENU"
+        return await message.reply("مرحباً في قسم الجذر /root، اختر الإجراء:", reply_markup=root_menu())
+
+    if step == "ROOT_MENU":
+        if text == "انشاء فولدر":
+            state["step"] = "ROOT_WAITING_FOLDER_NAME"
+            return await message.reply("أدخل اسم الفولدر الجديد (سيتم إنشاؤه في `/root`):")
+        elif text == "تنصيب ملف":
+            state["step"] = "ROOT_WAITING_FILE"
+            state["root_mode"] = True
+            return await message.reply("أرسل الملف الآن (يدعم `.zip` أو أي ملف آخر).\nسيتم حفظه في `/root`، وإذا كان `zip` سيتم فك ضغطه في مجلد بنفس الاسم.")
+        elif text == "عرض ملفات الجذر":
+            root_path = "/root"
+            if not os.path.exists(root_path):
+                return await message.reply("المجلد /root غير موجود.")
+            items = os.listdir(root_path)
+            if not items:
+                return await message.reply("المجلد /root فارغ.")
+            msg = "**📂 محتويات /root:**\n\n"
+            for item in sorted(items):
+                full = os.path.join(root_path, item)
+                if os.path.isdir(full):
+                    msg += f"📁 `{item}`\n"
+                else:
+                    size = os.path.getsize(full)
+                    msg += f"📄 `{item}` ({size} بايت)\n"
+            return await message.reply(msg)
+        elif text == "حذف ملف/مجلد":
+            state["step"] = "ROOT_WAITING_DELETE"
+            return await message.reply("أدخل اسم الملف أو المجلد الذي تريد حذفه من `/root`:")
+        elif text == "رجوع":
+            state["step"] = None
+            return await message.reply("تم الرجوع للقائمة الرئيسية.", reply_markup=main_menu(user_id))
+        else:
+            return await message.reply("استخدم الأزرار من القائمة.")
+
+    if step == "ROOT_WAITING_FOLDER_NAME" and user_id == ADMIN_ID:
+        folder_name = text.strip()
+        if not folder_name:
+            return await message.reply("الرجاء إدخال اسم صالح.")
+        target_path = os.path.join("/root", folder_name)
+        if os.path.exists(target_path):
+            return await message.reply(f"❌ المجلد `{folder_name}` موجود بالفعل في `/root`.")
+        try:
+            os.makedirs(target_path, exist_ok=True)
+            os.chmod(target_path, 0o755)
+            await message.reply(f"✅ تم إنشاء المجلد `{folder_name}` في `/root`.")
+        except Exception as e:
+            await message.reply(f"❌ حدث خطأ: {e}")
+        state["step"] = "ROOT_MENU"
+        return
+
+    if step == "ROOT_WAITING_DELETE" and user_id == ADMIN_ID:
+        name = text.strip()
+        if not name:
+            return await message.reply("الرجاء إدخال اسم صالح.")
+        target_path = os.path.join("/root", name)
+        if not os.path.exists(target_path):
+            return await message.reply(f"❌ الملف/المجلد `{name}` غير موجود في `/root`.")
+        try:
+            if os.path.isdir(target_path):
+                shutil.rmtree(target_path)
+            else:
+                os.remove(target_path)
+            await message.reply(f"✅ تم حذف `{name}` من `/root`.")
+        except Exception as e:
+            await message.reply(f"❌ حدث خطأ أثناء الحذف: {e}")
+        state["step"] = "ROOT_MENU"
+        return
+
+    # Screen management
+    if text == "عرض الاسكرينات" and user_id == ADMIN_ID:
+        if not running_bots:
+            return await message.reply("لا توجد أي اسكرينات (بوتات) شغالة حالياً.")
+        msg = "📋 **قائمة الاسكرينات الشغالة:**\n\n"
+        idx = 1
+        for key, proc in running_bots.items():
+            if proc.poll() is None:
+                user_id_key, slot = key.split('_')
+                msg += f"{idx}. 👤 `{user_id_key}` | 📦 رقم {slot}\n"
+                idx += 1
+        if idx == 1:
+            return await message.reply("لا توجد أي اسكرينات شغالة.")
+        return await message.reply(msg)
+
+    if text == "ايقاف اسكرين" and user_id == ADMIN_ID:
+        if not running_bots:
+            return await message.reply("لا توجد اسكرينات شغالة.")
+        state["step"] = "SCREEN_WAITING_NUMBER"
+        return await message.reply("أدخل رقم الاسكرين (من قائمة العرض) الذي تريد إيقافه:")
+
+    if step == "SCREEN_WAITING_NUMBER" and user_id == ADMIN_ID:
+        if not text.isdigit():
+            return await message.reply("الرجاء إدخال رقم صحيح.")
+        idx = int(text)
+        bot_keys = list(running_bots.keys())
+        if idx < 1 or idx > len(bot_keys):
+            return await message.reply("رقم غير موجود. استخدم الأرقام المعروضة.")
+        key = bot_keys[idx-1]
+        proc = running_bots[key]
+        if proc.poll() is not None:
+            del running_bots[key]
+            return await message.reply("هذه الاسكرين متوقفة بالفعل.")
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except:
+            proc.kill()
+        del running_bots[key]
+        await message.reply(f"✅ تم إيقاف الاسكرين رقم {idx} بنجاح.")
+        state["step"] = None
+        return
+
+    if text == "ايقاف جميع الاسكرينات" and user_id == ADMIN_ID:
+        if not running_bots:
+            return await message.reply("لا توجد اسكرينات شغالة.")
+        stopped = 0
+        for key, proc in list(running_bots.items()):
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except:
+                    proc.kill()
+                stopped += 1
+            del running_bots[key]
+        await message.reply(f"✅ تم إيقاف جميع الاسكرينات ({stopped} بوت).")
+        return
+
+    # Rest of existing logic...
+
     if text in ["تعطيل نظام الحمايه", "تفعيل نظام الحمايه"] and user_id == ADMIN_ID:
         if text == "تعطيل نظام الحمايه":
             db["security_enabled"] = False
@@ -342,27 +485,21 @@ async def handle_texts(client: Client, message: Message):
         state["step"] = None
         return
 
-    # New step for executing arbitrary commands
     if step == "WAITING_COMMAND":
         command = text.strip()
         if not command:
             return await message.reply("الرجاء إدخال أمر صحيح.")
-
         slot = state.get("selected_slot")
         target_id = state.get("target_id", user_id)
         if not slot or not target_id:
             state["step"] = None
             return await message.reply("حدث خطأ في الجلسة، أعد المحاولة.")
-
         bot_dir = f"hostings/{target_id}/slot_{slot}/bot"
         if not os.path.exists(bot_dir):
             state["step"] = None
             return await message.reply("المجلد غير موجود، قد يكون التنصيب محذوفاً.")
-
         await message.reply(f"⏳ جاري تنفيذ الأمر:\n`{command}`")
-
         try:
-            # Run command in the bot's directory
             result = subprocess.run(
                 command,
                 shell=True,
@@ -387,7 +524,6 @@ async def handle_texts(client: Client, message: Message):
             await message.reply("⏰ انتهى الوقت المحدد لتنفيذ الأمر (300 ثانية). قد يكون الأمر طويلاً.")
         except Exception as e:
             await message.reply(f"❌ حدث خطأ أثناء تنفيذ الأمر: {e}")
-
         state["step"] = None
         return
 
@@ -569,12 +705,10 @@ async def handle_texts(client: Client, message: Message):
         if db.get("locked", False) and user_id != ADMIN_ID and not is_vip(user_id):
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}")]])
             return await message.reply("🔒 عذراً، تم قفل التنصيب حالياً بواسطة المطور. يرجى مراسلته.", reply_markup=btn)
-
         limit = get_user_limit(user_id)
         slots = get_active_slots(user_id)
         if len(slots) >= limit:
             return await message.reply("❌ وصلت للحد الأقصى للتنصيبات المسموح بها.")
-
         available_slot = next((i for i in range(1, limit + 2) if i not in slots), 1)
         state["step"] = "WAITING_FOR_ZIP"
         state["slot"] = available_slot
@@ -972,6 +1106,50 @@ async def handle_docs(client: Client, message: Message):
     step = state.get("step")
     file_name = message.document.file_name
 
+    # Handle root file upload
+    if step == "ROOT_WAITING_FILE" and user_id == ADMIN_ID:
+        msg = await message.reply(f"⏳ جاري رفع الملف `{file_name}` إلى `/root`...")
+
+        downloaded = await message.download()
+        target_path = os.path.join("/root", file_name)
+
+        # Check if file already exists
+        if os.path.exists(target_path):
+            os.remove(downloaded)
+            return await msg.edit_text(f"❌ ملف باسم `{file_name}` موجود بالفعل في `/root`. الرجاء تغيير الاسم أو حذف الملف القديم.")
+
+        if file_name.endswith(".zip"):
+            # Extract to folder with same name (without .zip)
+            folder_name = os.path.splitext(file_name)[0]
+            extract_to = os.path.join("/root", folder_name)
+            if os.path.exists(extract_to):
+                os.remove(downloaded)
+                return await msg.edit_text(f"❌ المجلد `{folder_name}` موجود بالفعل في `/root`. لا يمكن الاستخراج.")
+            try:
+                os.makedirs(extract_to, exist_ok=True)
+                normalize_zip_extraction(downloaded, extract_to)
+                # Set permissions
+                for root, dirs, files in os.walk(extract_to):
+                    for d in dirs:
+                        os.chmod(os.path.join(root, d), 0o755)
+                    for f in files:
+                        os.chmod(os.path.join(root, f), 0o644)
+                os.remove(downloaded)
+                await msg.edit_text(f"✅ تم فك ضغط الملف `{file_name}` في `/root/{folder_name}` بنجاح.")
+            except Exception as e:
+                shutil.rmtree(extract_to, ignore_errors=True)
+                os.remove(downloaded)
+                await msg.edit_text(f"❌ فشل فك الضغط: {e}")
+        else:
+            # Just move the file
+            shutil.move(downloaded, target_path)
+            os.chmod(target_path, 0o644)
+            await msg.edit_text(f"✅ تم رفع الملف `{file_name}` إلى `/root`.")
+
+        state["step"] = "ROOT_MENU"
+        return
+
+    # Handle backup restore
     if step == "ADMIN_WAITING_BACKUP" and user_id == ADMIN_ID:
         if not file_name.endswith(".zip"):
             return await message.reply("❌ يرجى إرسال ملف بصيغة .zip فقط.")
@@ -1020,6 +1198,7 @@ async def handle_docs(client: Client, message: Message):
             await msg.edit_text(f"❌ حدث خطأ أثناء الاستخراج: {e}")
         return
 
+    # Handle adding file in bot management
     if step == "WAITING_ADD_FILE":
         current_dir = state.get("current_dir")
         if not current_dir or not os.path.exists(current_dir):
@@ -1050,6 +1229,7 @@ async def handle_docs(client: Client, message: Message):
         state["step"] = None
         return await message.reply(f"✅ تم تبديل وتحديث الملف `{file_name}` بنجاح.\nلا تنسَ عمل '🔄 إعادة تشغيل' للبوت.")
 
+    # Handle bot installation
     if step == "WAITING_FOR_ZIP":
         if not (file_name.endswith(".zip") or file_name.endswith(".py")):
             return await message.reply("❌ غير مسموح. يتم قبول ملفات `.zip` أو `.py` فقط.\nأي ملفات أخرى تم رفضها للحفاظ على المساحة.")
