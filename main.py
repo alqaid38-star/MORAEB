@@ -249,7 +249,7 @@ def manage_menu():
         [KeyboardButton("سجل البوت"), KeyboardButton("حالة البوت")],
         [KeyboardButton("إيقاف مؤقت"), KeyboardButton("تشغيل البوت"), KeyboardButton("🔄 إعادة تشغيل")],
         [KeyboardButton("⌨️ إدخال بيانات"), KeyboardButton("📂 إدارة الملفات")],
-        [KeyboardButton("تثبيت مكتب")],
+        [KeyboardButton("تثبيت مكتب"), KeyboardButton("تنفيذ أمر")],
         [KeyboardButton("رجوع")]
     ], resize_keyboard=True)
 
@@ -273,10 +273,10 @@ def root_menu():
     return ReplyKeyboardMarkup([
         [KeyboardButton("تنصيب ملف"), KeyboardButton("عرض ملفات الجذر")],
         [KeyboardButton("إدارة بوت جذري"), KeyboardButton("حذف ملف/مجلد")],
+        [KeyboardButton("تنفيذ أمر")],
         [KeyboardButton("رجوع")]
     ], resize_keyboard=True)
 
-# Helper to get all running processes (for screen listing)
 def get_all_running():
     all_procs = {}
     for k, v in running_bots.items():
@@ -312,7 +312,7 @@ async def start_command(client: Client, message: Message):
             await client.send_message(ADMIN_ID, admin_msg)
         except:
             pass
-    user_states[message.from_user.id] = {"step": None}
+    user_states[message.from_user.id] = {"step": None, "mode": None}
     await message.reply("أهلاً بك. اختر من القائمة أدناه:", reply_markup=main_menu(message.from_user.id))
 
 @app.on_message(filters.text & filters.private)
@@ -322,296 +322,20 @@ async def handle_texts(client: Client, message: Message):
     db = load_db()
     if str(user_id) in db.get("banned", []):
         return await message.reply("أنت محظور من استخدام البوت.")
-    if user_id not in user_states or user_states[user_id] is None:
-        user_states[user_id] = {"step": None}
+    if user_id not in user_states:
+        user_states[user_id] = {"step": None, "mode": None}
     state = user_states[user_id]
     step = state.get("step")
-    mode = state.get("mode")  # could be None, "root", "root_bot_manage"
+    mode = state.get("mode")  # None, "root", "root_bot_manage"
 
-    # ========== ROOT MENU HANDLING ==========
-    if text == "قسم الجذر" and user_id == ADMIN_ID:
-        state["step"] = "ROOT_MENU"
-        state["mode"] = "root"
-        return await message.reply("مرحباً في قسم الجذر /root، اختر الإجراء:", reply_markup=root_menu())
+    # ===================================================================
+    # 1. HANDLE PENDING STEPS (states) FIRST
+    # ===================================================================
 
-    if mode == "root" and step == "ROOT_MENU":
-        if text == "تنصيب ملف":
-            state["step"] = "ROOT_WAITING_FILE"
-            return await message.reply("أرسل الملف الآن (يدعم `.zip` أو `.py`).\nسيتم حفظه في `/root`، وإذا كان `zip` سيتم فك ضغطه في مجلد بنفس الاسم (بدون .zip).")
-        elif text == "عرض ملفات الجذر":
-            root_path = "/root"
-            if not os.path.exists(root_path):
-                return await message.reply("المجلد /root غير موجود.")
-            items = os.listdir(root_path)
-            if not items:
-                return await message.reply("المجلد /root فارغ.")
-            msg = "**📂 محتويات /root:**\n\n"
-            for item in sorted(items):
-                full = os.path.join(root_path, item)
-                if os.path.isdir(full):
-                    msg += f"📁 `{item}`\n"
-                else:
-                    size = os.path.getsize(full)
-                    msg += f"📄 `{item}` ({size} بايت)\n"
-            return await message.reply(msg)
-        elif text == "إدارة بوت جذري":
-            # Scan /root for folders containing .py
-            root_path = "/root"
-            bots = []
-            for item in os.listdir(root_path):
-                full = os.path.join(root_path, item)
-                if os.path.isdir(full):
-                    if find_main_script(full) is not None:
-                        bots.append(item)
-            if not bots:
-                return await message.reply("لا توجد بوتات جذرية (مجلدات تحتوي على ملف .py) في /root.")
-            state["step"] = "ROOT_WAITING_BOT_SELECT"
-            state["root_bots_list"] = bots
-            msg = "**قائمة البوتات الجذرية:**\n\n"
-            for i, name in enumerate(bots, 1):
-                msg += f"{i}. `{name}`\n"
-            msg += "\nأدخل رقم البوت الذي تريد إدارته:"
-            return await message.reply(msg)
-        elif text == "حذف ملف/مجلد":
-            state["step"] = "ROOT_WAITING_DELETE"
-            return await message.reply("أدخل اسم الملف أو المجلد الذي تريد حذفه من `/root`:")
-        elif text == "رجوع":
-            state["step"] = None
-            state["mode"] = None
-            return await message.reply("تم الرجوع للقائمة الرئيسية.", reply_markup=main_menu(user_id))
-        else:
-            return await message.reply("استخدم الأزرار من القائمة.")
-
-    if step == "ROOT_WAITING_DELETE" and user_id == ADMIN_ID and mode == "root":
-        name = text.strip()
-        if not name:
-            return await message.reply("الرجاء إدخال اسم صالح.")
-        target_path = os.path.join("/root", name)
-        if not os.path.exists(target_path):
-            return await message.reply(f"❌ الملف/المجلد `{name}` غير موجود في `/root`.")
-        try:
-            if os.path.isdir(target_path):
-                shutil.rmtree(target_path)
-            else:
-                os.remove(target_path)
-            await message.reply(f"✅ تم حذف `{name}` من `/root`.")
-        except Exception as e:
-            await message.reply(f"❌ حدث خطأ أثناء الحذف: {e}")
-        state["step"] = "ROOT_MENU"
-        return
-
-    if step == "ROOT_WAITING_BOT_SELECT" and user_id == ADMIN_ID and mode == "root":
-        if not text.isdigit():
-            return await message.reply("الرجاء إدخال رقم صحيح.")
-        idx = int(text)
-        bots = state.get("root_bots_list", [])
-        if idx < 1 or idx > len(bots):
-            return await message.reply("رقم غير موجود. استخدم الأرقام المعروضة.")
-        bot_name = bots[idx-1]
-        bot_dir = os.path.join("/root", bot_name)
-        if not os.path.exists(bot_dir):
-            return await message.reply("المجلد غير موجود، ربما تم حذفه.")
-        state["mode"] = "root_bot_manage"
-        state["root_bot_name"] = bot_name
-        state["current_dir"] = bot_dir
-        state["target_id"] = user_id  # not used but for compatibility
-        state["selected_slot"] = None
-        state["step"] = None
-        return await message.reply(f"✅ تم الدخول لإدارة البوت الجذري `{bot_name}`. اختر الإجراء:", reply_markup=manage_menu())
-
-    # ========== ROOT BOT MANAGEMENT (reuse manage_menu actions) ==========
-    # If we are in root_bot_manage mode, we handle actions using the root bot folder
-    if mode == "root_bot_manage":
-        bot_dir = state.get("current_dir")
-        bot_name = state.get("root_bot_name")
-        if not bot_dir or not os.path.exists(bot_dir):
-            state["mode"] = "root"
-            state["step"] = "ROOT_MENU"
-            return await message.reply("المجلد غير موجود، تم الرجوع لقائمة الجذر.", reply_markup=root_menu())
-
-        process_key = f"root_{bot_name}"
-
-        # Handle general actions
-        if text == "سجل البوت":
-            log_path = os.path.join(bot_dir, "log.txt")
-            if os.path.exists(log_path):
-                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                    log_text = "".join(f.readlines()[-50:])
-                return await message.reply(f"**سجل البوت الجذري:**\n```\n{log_text[-4000:]}\n```")
-            else:
-                return await message.reply("لا يوجد سجل حتى الآن.")
-
-        elif text == "حالة البوت":
-            if process_key in root_bots and root_bots[process_key].poll() is None:
-                return await message.reply("الحالة: يعمل 🟢")
-            else:
-                return await message.reply("الحالة: متوقف ⚪")
-
-        elif text == "إيقاف مؤقت":
-            if process_key in root_bots:
-                try:
-                    root_bots[process_key].terminate()
-                except:
-                    pass
-                del root_bots[process_key]
-                return await message.reply("تم الإيقاف المؤقت بنجاح.")
-            else:
-                return await message.reply("البوت متوقف بالفعل.")
-
-        elif text == "تشغيل البوت":
-            script_path = find_main_script(bot_dir)
-            if script_path:
-                auto_install_requirements(bot_dir, script_path)
-                log_file = open(os.path.join(bot_dir, "log.txt"), "a")
-                p = subprocess.Popen(
-                    ["python3", os.path.basename(script_path)],
-                    cwd=os.path.dirname(script_path),
-                    stdin=subprocess.PIPE,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT
-                )
-                root_bots[process_key] = p
-                return await message.reply("تم تشغيل البوت الجذري بنجاح.")
-            else:
-                return await message.reply("لم يتم العثور على ملف py للتشغيل.")
-
-        elif text == "🔄 إعادة تشغيل":
-            if process_key in root_bots:
-                try:
-                    root_bots[process_key].terminate()
-                except:
-                    pass
-                del root_bots[process_key]
-            script_path = find_main_script(bot_dir)
-            if script_path:
-                auto_install_requirements(bot_dir, script_path)
-                log_file = open(os.path.join(bot_dir, "log.txt"), "a")
-                p = subprocess.Popen(
-                    ["python3", os.path.basename(script_path)],
-                    cwd=os.path.dirname(script_path),
-                    stdin=subprocess.PIPE,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT
-                )
-                root_bots[process_key] = p
-                return await message.reply("✅ تم إعادة تشغيل البوت الجذري بنجاح.")
-            else:
-                return await message.reply("❌ لم يتم العثور على ملف التشغيل.")
-
-        elif text == "⌨️ إدخال بيانات":
-            if process_key in root_bots and root_bots[process_key].poll() is None:
-                state["step"] = "WAITING_INPUT"
-                return await message.reply("أدخل القيمة الآن:")
-            else:
-                return await message.reply("البوت متوقف، لا يمكن إرسال بيانات له.")
-
-        elif text == "📂 إدارة الملفات":
-            state["current_dir"] = bot_dir
-            return await message.reply("أهلاً بك في قسم إدارة الملفات:", reply_markup=file_manage_menu())
-
-        elif text == "تثبيت مكتب":
-            state["step"] = "WAITING_COMMAND"
-            state["target_id"] = user_id
-            state["selected_slot"] = None  # not used
-            return await message.reply("أدخل الأمر الذي تريد تنفيذه (مثل: `pip install requests`):")
-
-        elif text == "رجوع":
-            state["mode"] = "root"
-            state["step"] = "ROOT_MENU"
-            state["root_bot_name"] = None
-            state["current_dir"] = None
-            return await message.reply("تم الرجوع لقائمة الجذر.", reply_markup=root_menu())
-
-        elif text in ["📄 عرض الملفات", "📁 دخول مجلد", "➕ إضافة ملف", "🔄 تبديل ملف", "🗑 حذف ملف", "🔙 المجلد السابق"]:
-            # Use the same file management logic but with base_bot_dir = bot_dir
-            current_dir = state.get("current_dir")
-            if not current_dir or not os.path.exists(current_dir):
-                return await message.reply("الرجاء الدخول لإدارة الملفات أولاً.", reply_markup=manage_menu())
-
-            base_bot_dir = os.path.abspath(bot_dir)  # root bot folder
-
-            if text == "📄 عرض الملفات":
-                items = os.listdir(current_dir)
-                if not items:
-                    return await message.reply("المجلد فارغ.")
-                msg = "**الملفات والمجلدات:**\n\n"
-                for item in sorted(items):
-                    full = os.path.join(current_dir, item)
-                    if os.path.isdir(full):
-                        msg += f"📁 `{item}`\n"
-                    else:
-                        msg += f"📄 `{item}`\n"
-                return await message.reply(msg)
-
-            elif text == "📁 دخول مجلد":
-                state["step"] = "WAITING_FOLDER_NAME"
-                return await message.reply("أدخل اسم المجلد الذي تريد الدخول إليه بالضبط:")
-
-            elif text == "🔙 المجلد السابق":
-                abs_current = os.path.abspath(current_dir)
-                if abs_current == base_bot_dir:
-                    return await message.reply("أنت في المجلد الرئيسي (الأساسي) للبوت، لا يمكن الرجوع أكثر.")
-                state["current_dir"] = os.path.dirname(abs_current)
-                return await message.reply("تم الرجوع للمجلد السابق. اضغط 'عرض الملفات'.")
-
-            elif text == "🗑 حذف ملف":
-                state["step"] = "WAITING_DELETE_FILE_NAME"
-                return await message.reply("أدخل اسم الملف أو المجلد الذي تريد حذفه (بما في ذلك الصيغة):")
-
-            elif text == "➕ إضافة ملف":
-                state["step"] = "WAITING_ADD_FILE"
-                return await message.reply("أرسل الملف الجديد الآن.\nسيتم حفظه بنفس اسمه في المجلد الحالي.")
-
-            elif text == "🔄 تبديل ملف":
-                state["step"] = "WAITING_REPLACE_FILE"
-                return await message.reply("أرسل الملف الجديد الآن.\n⚠️ **ملاحظة:** يجب أن يكون اسم الملف المرسل هو نفس اسم الملف الموجود في المجلد ليتم استبداله.")
-
-        else:
-            await message.reply("أمر غير معروف، استخدم الأزرار.", reply_markup=manage_menu())
-        return
-
-    # ========== REGULAR BOT MANAGEMENT (existing) ==========
-    # ... (rest of the existing code for regular bot management, with minor adjustments)
-
-    # Handle regular bot management actions as before, but we need to ensure that when in root_bot_manage we don't fall through.
-
-    # Continue with regular handlers...
-
-    if text in ["تعطيل نظام الحمايه", "تفعيل نظام الحمايه"] and user_id == ADMIN_ID:
-        if text == "تعطيل نظام الحمايه":
-            db["security_enabled"] = False
-            save_db(db)
-            await message.reply("🔒 **تم تعطيل نظام الحماية.** الآن يمكن رفع أي ملف (حتى المشبوه) بدون فحص.", reply_markup=main_menu(user_id))
-        else:
-            db["security_enabled"] = True
-            save_db(db)
-            await message.reply("🔓 **تم تفعيل نظام الحماية.** سيتم فحص الملفات المرفوعة ومنع الملفات الضارة.", reply_markup=main_menu(user_id))
-        user_states[user_id] = {"step": None}
-        return
-
-    if text == "رجوع":
-        # If we are in root_bot_manage, go back to root menu
-        if mode == "root_bot_manage":
-            state["mode"] = "root"
-            state["step"] = "ROOT_MENU"
-            state["root_bot_name"] = None
-            state["current_dir"] = None
-            return await message.reply("تم الرجوع لقائمة الجذر.", reply_markup=root_menu())
-        # else go to main
-        user_states[user_id] = {"step": None, "target_id": None}
-        return await message.reply("تم الرجوع للرئيسية.", reply_markup=main_menu(user_id))
-
-    if text == "الرجوع لإدارة البوت":
-        state["step"] = None
-        if mode == "root_bot_manage":
-            return await message.reply("تم الرجوع لقائمة إدارة البوت.", reply_markup=manage_menu())
-        else:
-            return await message.reply("تم الرجوع لقائمة الإدارة.", reply_markup=manage_menu())
-
+    # ----- WAITING_INPUT (for sending data to bot stdin) -----
     if step == "WAITING_INPUT":
         target_id = state.get("target_id", user_id)
         slot = state.get("selected_slot")
-        # Determine process key
         if mode == "root_bot_manage":
             bot_name = state.get("root_bot_name")
             process_key = f"root_{bot_name}"
@@ -628,20 +352,25 @@ async def handle_texts(client: Client, message: Message):
             except Exception as e:
                 await message.reply(f"❌ خطأ أثناء الإدخال: {e}")
         else:
-            await message.reply("⚠️ عذراً، البوت لا يعمل لكي يستقبل بيانات.")
+            await message.reply("⚠️ البوت لا يعمل، لا يمكن إرسال بيانات.")
         state["step"] = None
         return
 
+    # ----- WAITING_COMMAND (execute any shell command) -----
     if step == "WAITING_COMMAND":
         command = text.strip()
         if not command:
             return await message.reply("الرجاء إدخال أمر صحيح.")
+        # Determine working directory
         if mode == "root_bot_manage":
             bot_dir = state.get("current_dir")
             if not bot_dir or not os.path.exists(bot_dir):
                 state["step"] = None
                 return await message.reply("المجلد غير موجود.")
             cwd = bot_dir
+        elif mode == "root":
+            # if in root menu but not in bot manage, use /root
+            cwd = "/root"
         else:
             slot = state.get("selected_slot")
             target_id = state.get("target_id", user_id)
@@ -651,7 +380,7 @@ async def handle_texts(client: Client, message: Message):
             bot_dir = f"hostings/{target_id}/slot_{slot}/bot"
             if not os.path.exists(bot_dir):
                 state["step"] = None
-                return await message.reply("المجلد غير موجود، قد يكون التنصيب محذوفاً.")
+                return await message.reply("المجلد غير موجود.")
             cwd = bot_dir
         await message.reply(f"⏳ جاري تنفيذ الأمر:\n`{command}`")
         try:
@@ -666,24 +395,29 @@ async def handle_texts(client: Client, message: Message):
             output = result.stdout
             error = result.stderr
             if result.returncode == 0:
-                reply = f"✅ **تم تنفيذ الأمر بنجاح.**\n\n**الإخراج:**\n```\n{output[-2000:]}\n```"
+                reply = f"✅ **تم التنفيذ بنجاح.**\n\n**الإخراج:**\n```\n{output[-2000:]}\n```"
                 if error:
                     reply += f"\n\n**تحذير (stderr):**\n```\n{error[-500:]}\n```"
                 await message.reply(reply)
             else:
-                reply = f"❌ **فشل تنفيذ الأمر.**\n\n**الخطأ:**\n```\n{error[-2000:]}\n```"
+                reply = f"❌ **فشل التنفيذ.**\n\n**الخطأ:**\n```\n{error[-2000:]}\n```"
                 if output:
                     reply += f"\n\n**الإخراج:**\n```\n{output[-500:]}\n```"
                 await message.reply(reply)
         except subprocess.TimeoutExpired:
-            await message.reply("⏰ انتهى الوقت المحدد لتنفيذ الأمر (300 ثانية). قد يكون الأمر طويلاً.")
+            await message.reply("⏰ انتهى الوقت المحدد (300 ثانية).")
         except Exception as e:
-            await message.reply(f"❌ حدث خطأ أثناء تنفيذ الأمر: {e}")
+            await message.reply(f"❌ خطأ: {e}")
         state["step"] = None
         return
 
+    # ----- WAITING_FOLDER_NAME (enter a subfolder) -----
     if step == "WAITING_FOLDER_NAME":
-        target_path = os.path.join(state["current_dir"], text)
+        current_dir = state.get("current_dir")
+        if not current_dir or not os.path.exists(current_dir):
+            state["step"] = None
+            return await message.reply("المجلد الحالي غير موجود.")
+        target_path = os.path.join(current_dir, text)
         if os.path.isdir(target_path):
             state["current_dir"] = target_path
             await message.reply(f"✅ تم الدخول للمجلد: `{text}`\nاضغط 'عرض الملفات' لرؤية المحتوى.")
@@ -692,8 +426,13 @@ async def handle_texts(client: Client, message: Message):
         state["step"] = None
         return
 
+    # ----- WAITING_DELETE_FILE_NAME -----
     if step == "WAITING_DELETE_FILE_NAME":
-        target_path = os.path.join(state["current_dir"], text)
+        current_dir = state.get("current_dir")
+        if not current_dir or not os.path.exists(current_dir):
+            state["step"] = None
+            return await message.reply("المجلد الحالي غير موجود.")
+        target_path = os.path.join(current_dir, text)
         if os.path.exists(target_path):
             try:
                 if os.path.isdir(target_path):
@@ -708,6 +447,7 @@ async def handle_texts(client: Client, message: Message):
         state["step"] = None
         return
 
+    # ----- WAITING_SLOT_DELETE (delete a specific slot) -----
     if step == "WAITING_SLOT_DELETE" and text.isdigit():
         slot = int(text)
         slot_dir = f"hostings/{user_id}/slot_{slot}"
@@ -734,6 +474,7 @@ async def handle_texts(client: Client, message: Message):
         state["step"] = None
         return
 
+    # ----- WAITING_SLOT_MANAGE (choose slot to manage) -----
     if step == "WAITING_SLOT_MANAGE" and text.isdigit():
         slot = int(text)
         slot_dir = f"hostings/{user_id}/slot_{slot}"
@@ -741,13 +482,14 @@ async def handle_texts(client: Client, message: Message):
             state["selected_slot"] = slot
             state["target_id"] = user_id
             state["step"] = None
-            state["mode"] = None  # ensure we are not in root mode
+            state["mode"] = None
             return await message.reply(f"✅ تم الدخول لإدارة التنصيب رقم ({slot}). اختر الإجراء:", reply_markup=manage_menu())
         else:
             await message.reply("❌ التنصيب غير موجود.")
             state["step"] = None
             return
 
+    # ----- ADMIN: WAITING_USER_ID -----
     if step == "ADMIN_WAITING_USER_ID" and text.isdigit():
         target_id = int(text)
         slots = get_active_slots(target_id)
@@ -856,293 +598,578 @@ async def handle_texts(client: Client, message: Message):
         state["step"] = None
         return
 
-    if text == "تنصيب بوت":
-        await check_disk_space(client)
-        if db.get("locked", False) and user_id != ADMIN_ID and not is_vip(user_id):
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}")]])
-            return await message.reply("🔒 عذراً، تم قفل التنصيب حالياً بواسطة المطور. يرجى مراسلته.", reply_markup=btn)
-        limit = get_user_limit(user_id)
-        slots = get_active_slots(user_id)
-        if len(slots) >= limit:
-            return await message.reply("❌ وصلت للحد الأقصى للتنصيبات المسموح بها.")
-        available_slot = next((i for i in range(1, limit + 2) if i not in slots), 1)
-        state["step"] = "WAITING_FOR_ZIP"
-        state["slot"] = available_slot
-        state["mode"] = None
-        return await message.reply("أرسل ملف البوت (.zip أو .py فقط) الآن:")
-
-    elif text == "حذف تنصيب":
-        slots = get_active_slots(user_id)
-        if not slots:
-            return await message.reply("لا يوجد لديك تنصيبات لحذفها.")
-        if len(slots) == 1:
-            slot = slots[0]
-            slot_dir = f"hostings/{user_id}/slot_{slot}"
-            if os.path.exists(slot_dir):
-                token = None
-                bot_dir = f"{slot_dir}/bot"
-                if os.path.exists(bot_dir):
-                    token = find_bot_token_in_dir(bot_dir)
-                process_key = f"{user_id}_{slot}"
-                if process_key in running_bots:
-                    try:
-                        running_bots[process_key].terminate()
-                    except:
-                        pass
-                    del running_bots[process_key]
-                shutil.rmtree(slot_dir, ignore_errors=True)
-                if token:
-                    remove_used_token(token)
-                else:
-                    remove_user_tokens(user_id, slot)
-            return await message.reply("✅ تم حذف التنصيب بنجاح.")
-        else:
-            state["step"] = "WAITING_SLOT_DELETE"
-            return await message.reply("لديك أكثر من تنصيب، أدخل الرقم الذي تريد حذفه:")
-
-    elif text in ["قسم الإدارة", "إدارة بوتك"]:
-        state["target_id"] = user_id
-        state["mode"] = None
-        slots = get_active_slots(user_id)
-        if not slots:
-            return await message.reply("لا يوجد تنصيبات حالياً لإدارتها.")
-        if len(slots) == 1:
-            state["selected_slot"] = slots[0]
-            return await message.reply(f"تم اختيار التنصيب التلقائي ({slots[0]}). اختر الإجراء:", reply_markup=manage_menu())
-        else:
-            state["step"] = "WAITING_SLOT_MANAGE"
-            return await message.reply("أدخل رقم التنصيب الذي تريد إدارته:")
-
-    elif text == "المنصبين" and user_id == ADMIN_ID:
-        if not os.path.exists("hostings") or not os.listdir("hostings"):
-            return await message.reply("لا يوجد أي تنصيبات حالياً.")
-        msg = "📋 **قائمة المنصبين:**\n\n"
-        count = 1
-        for uid in os.listdir("hostings"):
-            user_path = os.path.join("hostings", uid)
-            if os.path.isdir(user_path):
-                for slot_dir in os.listdir(user_path):
-                    if slot_dir.startswith("slot_"):
-                        slot_num = slot_dir.split("_")[1]
-                        bot_dir = f"{user_path}/{slot_dir}/bot"
-                        script_path = find_main_script(bot_dir)
-                        file_name = os.path.basename(script_path) if script_path else "غير معروف"
-                        msg += f"**{count}-**\n"
-                        msg += f"👤 **الآيدي:** `{uid}`\n"
-                        msg += f"📦 **رقم التنصيب:** `{slot_num}`\n"
-                        msg += f"📄 **الملف الرئيسي:** `{file_name}`\n"
-                        msg += "──────────────\n"
-                        count += 1
-        if count == 1:
-            return await message.reply("لا يوجد أي تنصيبات حالياً.")
-        return await message.reply(msg)
-
-    elif text == "جلب نسخة احتياطية" and user_id == ADMIN_ID:
-        msg = await message.reply("⏳ جاري تحضير النسخة الاحتياطية...")
-        backup_name = "Backup.zip"
+    # ----- ROOT specific states -----
+    if step == "ROOT_WAITING_DELETE" and user_id == ADMIN_ID and mode == "root":
+        name = text.strip()
+        if not name:
+            return await message.reply("الرجاء إدخال اسم صالح.")
+        target_path = os.path.join("/root", name)
+        if not os.path.exists(target_path):
+            return await message.reply(f"❌ الملف/المجلد `{name}` غير موجود في `/root`.")
         try:
-            with zipfile.ZipFile(backup_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                if os.path.exists("database.json"):
-                    zipf.write("database.json")
-                if os.path.exists("hostings"):
-                    for root, _, files in os.walk("hostings"):
-                        for file in files:
-                            zipf.write(os.path.join(root, file))
-            await message.reply_document(backup_name, caption="📦 النسخة الاحتياطية الخاصة بك جاهزة.")
-            os.remove(backup_name)
-            await msg.delete()
+            if os.path.isdir(target_path):
+                shutil.rmtree(target_path)
+            else:
+                os.remove(target_path)
+            await message.reply(f"✅ تم حذف `{name}` من `/root`.")
         except Exception as e:
-            await msg.edit_text(f"❌ حدث خطأ أثناء تجهيز النسخة: {e}")
+            await message.reply(f"❌ حدث خطأ أثناء الحذف: {e}")
+        state["step"] = "ROOT_MENU"
+        return
 
-    elif text == "رفع نسخة احتياطية" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_WAITING_BACKUP"
-        return await message.reply("أرسل ملف النسخة الاحتياطية (`.zip`) الآن:\n⚠️ **تحذير:** رفع النسخة سيقوم بإيقاف البوتات الشغالة واستبدال الملفات ثم إعادة تشغيلهم تلقائياً.")
+    if step == "ROOT_WAITING_BOT_SELECT" and user_id == ADMIN_ID and mode == "root":
+        if not text.isdigit():
+            return await message.reply("الرجاء إدخال رقم صحيح.")
+        idx = int(text)
+        bots = state.get("root_bots_list", [])
+        if idx < 1 or idx > len(bots):
+            return await message.reply("رقم غير موجود. استخدم الأرقام المعروضة.")
+        bot_name = bots[idx-1]
+        bot_dir = os.path.join("/root", bot_name)
+        if not os.path.exists(bot_dir):
+            return await message.reply("المجلد غير موجود، ربما تم حذفه.")
+        state["mode"] = "root_bot_manage"
+        state["root_bot_name"] = bot_name
+        state["current_dir"] = bot_dir
+        state["target_id"] = user_id
+        state["selected_slot"] = None
+        state["step"] = None
+        return await message.reply(f"✅ تم الدخول لإدارة البوت الجذري `{bot_name}`. اختر الإجراء:", reply_markup=manage_menu())
 
-    elif text == "إدارة بوتات الأعضاء" and user_id == ADMIN_ID:
-        return await message.reply("إدارة الأعضاء:", reply_markup=admin_users_menu())
+    # ===================================================================
+    # 2. HANDLE BUTTON PRESSES (non‑state texts)
+    # ===================================================================
 
-    elif text == "الإحصائيات والتقرير" and user_id == ADMIN_ID:
-        total_users = len(db["users"])
-        active_installations = 0
-        if os.path.exists("hostings"):
+    # ----- Root menu buttons -----
+    if text == "قسم الجذر" and user_id == ADMIN_ID:
+        state["step"] = "ROOT_MENU"
+        state["mode"] = "root"
+        return await message.reply("مرحباً في قسم الجذر /root، اختر الإجراء:", reply_markup=root_menu())
+
+    if mode == "root" and step == "ROOT_MENU":
+        if text == "تنصيب ملف":
+            state["step"] = "ROOT_WAITING_FILE"
+            return await message.reply("أرسل الملف الآن (يدعم `.zip` أو `.py`).\nسيتم حفظه في `/root`، وإذا كان `zip` سيتم فك ضغطه في مجلد بنفس الاسم.")
+        elif text == "عرض ملفات الجذر":
+            root_path = "/root"
+            if not os.path.exists(root_path):
+                return await message.reply("المجلد /root غير موجود.")
+            items = os.listdir(root_path)
+            if not items:
+                return await message.reply("المجلد /root فارغ.")
+            msg = "**📂 محتويات /root:**\n\n"
+            for item in sorted(items):
+                full = os.path.join(root_path, item)
+                if os.path.isdir(full):
+                    msg += f"📁 `{item}`\n"
+                else:
+                    size = os.path.getsize(full)
+                    msg += f"📄 `{item}` ({size} بايت)\n"
+            return await message.reply(msg)
+        elif text == "إدارة بوت جذري":
+            root_path = "/root"
+            bots = []
+            for item in os.listdir(root_path):
+                full = os.path.join(root_path, item)
+                if os.path.isdir(full):
+                    if find_main_script(full) is not None:
+                        bots.append(item)
+            if not bots:
+                return await message.reply("لا توجد بوتات جذرية (مجلدات تحتوي على ملف .py) في /root.")
+            state["step"] = "ROOT_WAITING_BOT_SELECT"
+            state["root_bots_list"] = bots
+            msg = "**قائمة البوتات الجذرية:**\n\n"
+            for i, name in enumerate(bots, 1):
+                msg += f"{i}. `{name}`\n"
+            msg += "\nأدخل رقم البوت الذي تريد إدارته:"
+            return await message.reply(msg)
+        elif text == "حذف ملف/مجلد":
+            state["step"] = "ROOT_WAITING_DELETE"
+            return await message.reply("أدخل اسم الملف أو المجلد الذي تريد حذفه من `/root`:")
+        elif text == "تنفيذ أمر":
+            state["step"] = "WAITING_COMMAND"
+            state["mode"] = "root"
+            return await message.reply("أدخل الأمر الذي تريد تنفيذه في `/root`:\n(مثل: `ls -la`)")
+        elif text == "رجوع":
+            state["step"] = None
+            state["mode"] = None
+            return await message.reply("تم الرجوع للقائمة الرئيسية.", reply_markup=main_menu(user_id))
+        else:
+            return await message.reply("استخدم الأزرار من القائمة.")
+
+    # ----- Root bot management buttons (when mode = root_bot_manage) -----
+    if mode == "root_bot_manage":
+        bot_dir = state.get("current_dir")
+        bot_name = state.get("root_bot_name")
+        if not bot_dir or not os.path.exists(bot_dir):
+            state["mode"] = "root"
+            state["step"] = "ROOT_MENU"
+            return await message.reply("المجلد غير موجود، تم الرجوع لقائمة الجذر.", reply_markup=root_menu())
+
+        process_key = f"root_{bot_name}"
+
+        # Handle the manage_menu actions for root bot
+        if text == "سجل البوت":
+            log_path = os.path.join(bot_dir, "log.txt")
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    log_text = "".join(f.readlines()[-50:])
+                return await message.reply(f"**سجل البوت الجذري:**\n```\n{log_text[-4000:]}\n```")
+            else:
+                return await message.reply("لا يوجد سجل حتى الآن.")
+
+        elif text == "حالة البوت":
+            if process_key in root_bots and root_bots[process_key].poll() is None:
+                return await message.reply("الحالة: يعمل 🟢")
+            else:
+                return await message.reply("الحالة: متوقف ⚪")
+
+        elif text == "إيقاف مؤقت":
+            if process_key in root_bots:
+                try:
+                    root_bots[process_key].terminate()
+                except:
+                    pass
+                del root_bots[process_key]
+                return await message.reply("تم الإيقاف المؤقت بنجاح.")
+            else:
+                return await message.reply("البوت متوقف بالفعل.")
+
+        elif text == "تشغيل البوت":
+            script_path = find_main_script(bot_dir)
+            if script_path:
+                auto_install_requirements(bot_dir, script_path)
+                log_file = open(os.path.join(bot_dir, "log.txt"), "a")
+                p = subprocess.Popen(
+                    ["python3", os.path.basename(script_path)],
+                    cwd=os.path.dirname(script_path),
+                    stdin=subprocess.PIPE,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT
+                )
+                root_bots[process_key] = p
+                return await message.reply("تم تشغيل البوت الجذري بنجاح.")
+            else:
+                return await message.reply("لم يتم العثور على ملف py للتشغيل.")
+
+        elif text == "🔄 إعادة تشغيل":
+            if process_key in root_bots:
+                try:
+                    root_bots[process_key].terminate()
+                except:
+                    pass
+                del root_bots[process_key]
+            script_path = find_main_script(bot_dir)
+            if script_path:
+                auto_install_requirements(bot_dir, script_path)
+                log_file = open(os.path.join(bot_dir, "log.txt"), "a")
+                p = subprocess.Popen(
+                    ["python3", os.path.basename(script_path)],
+                    cwd=os.path.dirname(script_path),
+                    stdin=subprocess.PIPE,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT
+                )
+                root_bots[process_key] = p
+                return await message.reply("✅ تم إعادة تشغيل البوت الجذري بنجاح.")
+            else:
+                return await message.reply("❌ لم يتم العثور على ملف التشغيل.")
+
+        elif text == "⌨️ إدخال بيانات":
+            if process_key in root_bots and root_bots[process_key].poll() is None:
+                state["step"] = "WAITING_INPUT"
+                return await message.reply("أدخل القيمة الآن:")
+            else:
+                return await message.reply("البوت متوقف، لا يمكن إرسال بيانات له.")
+
+        elif text == "📂 إدارة الملفات":
+            state["current_dir"] = bot_dir
+            return await message.reply("أهلاً بك في قسم إدارة الملفات:", reply_markup=file_manage_menu())
+
+        elif text == "تثبيت مكتب":
+            state["step"] = "WAITING_COMMAND"
+            state["target_id"] = user_id
+            state["selected_slot"] = None
+            return await message.reply("أدخل أمر التثبيت (مثل: `pip install requests`):")
+
+        elif text == "تنفيذ أمر":
+            state["step"] = "WAITING_COMMAND"
+            state["target_id"] = user_id
+            state["selected_slot"] = None
+            return await message.reply("أدخل الأمر الذي تريد تنفيذه في هذا البوت:\n(مثل: `ls -la`)")
+
+        elif text == "رجوع":
+            state["mode"] = "root"
+            state["step"] = "ROOT_MENU"
+            state["root_bot_name"] = None
+            state["current_dir"] = None
+            return await message.reply("تم الرجوع لقائمة الجذر.", reply_markup=root_menu())
+
+        # File management for root bot
+        elif text in ["📄 عرض الملفات", "📁 دخول مجلد", "➕ إضافة ملف", "🔄 تبديل ملف", "🗑 حذف ملف", "🔙 المجلد السابق"]:
+            current_dir = state.get("current_dir")
+            if not current_dir or not os.path.exists(current_dir):
+                return await message.reply("الرجاء الدخول لإدارة الملفات أولاً.", reply_markup=manage_menu())
+
+            base_bot_dir = os.path.abspath(bot_dir)
+
+            if text == "📄 عرض الملفات":
+                items = os.listdir(current_dir)
+                if not items:
+                    return await message.reply("المجلد فارغ.")
+                msg = "**الملفات والمجلدات:**\n\n"
+                for item in sorted(items):
+                    full = os.path.join(current_dir, item)
+                    if os.path.isdir(full):
+                        msg += f"📁 `{item}`\n"
+                    else:
+                        msg += f"📄 `{item}`\n"
+                return await message.reply(msg)
+
+            elif text == "📁 دخول مجلد":
+                state["step"] = "WAITING_FOLDER_NAME"
+                return await message.reply("أدخل اسم المجلد الذي تريد الدخول إليه بالضبط:")
+
+            elif text == "🔙 المجلد السابق":
+                abs_current = os.path.abspath(current_dir)
+                if abs_current == base_bot_dir:
+                    return await message.reply("أنت في المجلد الرئيسي (الأساسي) للبوت، لا يمكن الرجوع أكثر.")
+                state["current_dir"] = os.path.dirname(abs_current)
+                return await message.reply("تم الرجوع للمجلد السابق. اضغط 'عرض الملفات'.")
+
+            elif text == "🗑 حذف ملف":
+                state["step"] = "WAITING_DELETE_FILE_NAME"
+                return await message.reply("أدخل اسم الملف أو المجلد الذي تريد حذفه (بما في ذلك الصيغة):")
+
+            elif text == "➕ إضافة ملف":
+                state["step"] = "WAITING_ADD_FILE"
+                return await message.reply("أرسل الملف الجديد الآن.\nسيتم حفظه بنفس اسمه في المجلد الحالي.")
+
+            elif text == "🔄 تبديل ملف":
+                state["step"] = "WAITING_REPLACE_FILE"
+                return await message.reply("أرسل الملف الجديد الآن.\n⚠️ **ملاحظة:** يجب أن يكون اسم الملف المرسل هو نفس اسم الملف الموجود في المجلد ليتم استبداله.")
+
+        else:
+            await message.reply("أمر غير معروف، استخدم الأزرار.", reply_markup=manage_menu())
+        return
+
+    # ----- Regular bot management buttons (non‑root) -----
+    # But first, handle global buttons that might appear in both contexts
+    if text in ["تعطيل نظام الحمايه", "تفعيل نظام الحمايه"] and user_id == ADMIN_ID:
+        if text == "تعطيل نظام الحمايه":
+            db["security_enabled"] = False
+            save_db(db)
+            await message.reply("🔒 **تم تعطيل نظام الحماية.**", reply_markup=main_menu(user_id))
+        else:
+            db["security_enabled"] = True
+            save_db(db)
+            await message.reply("🔓 **تم تفعيل نظام الحماية.**", reply_markup=main_menu(user_id))
+        user_states[user_id] = {"step": None, "mode": None}
+        return
+
+    if text == "رجوع":
+        if mode == "root_bot_manage":
+            state["mode"] = "root"
+            state["step"] = "ROOT_MENU"
+            state["root_bot_name"] = None
+            state["current_dir"] = None
+            return await message.reply("تم الرجوع لقائمة الجذر.", reply_markup=root_menu())
+        user_states[user_id] = {"step": None, "mode": None}
+        return await message.reply("تم الرجوع للرئيسية.", reply_markup=main_menu(user_id))
+
+    if text == "الرجوع لإدارة البوت":
+        state["step"] = None
+        if mode == "root_bot_manage":
+            return await message.reply("تم الرجوع لقائمة إدارة البوت.", reply_markup=manage_menu())
+        else:
+            return await message.reply("تم الرجوع لقائمة الإدارة.", reply_markup=manage_menu())
+
+    # ----- Regular bot actions (only if not root mode) -----
+    if mode != "root_bot_manage" and mode != "root":
+        if text == "تنصيب بوت":
+            await check_disk_space(client)
+            if db.get("locked", False) and user_id != ADMIN_ID and not is_vip(user_id):
+                btn = InlineKeyboardMarkup([[InlineKeyboardButton("المطور", url=f"tg://openmessage?user_id={ADMIN_ID}")]])
+                return await message.reply("🔒 عذراً، تم قفل التنصيب حالياً بواسطة المطور. يرجى مراسلته.", reply_markup=btn)
+            limit = get_user_limit(user_id)
+            slots = get_active_slots(user_id)
+            if len(slots) >= limit:
+                return await message.reply("❌ وصلت للحد الأقصى للتنصيبات المسموح بها.")
+            available_slot = next((i for i in range(1, limit + 2) if i not in slots), 1)
+            state["step"] = "WAITING_FOR_ZIP"
+            state["slot"] = available_slot
+            state["mode"] = None
+            return await message.reply("أرسل ملف البوت (.zip أو .py فقط) الآن:")
+
+        elif text == "حذف تنصيب":
+            slots = get_active_slots(user_id)
+            if not slots:
+                return await message.reply("لا يوجد لديك تنصيبات لحذفها.")
+            if len(slots) == 1:
+                slot = slots[0]
+                slot_dir = f"hostings/{user_id}/slot_{slot}"
+                if os.path.exists(slot_dir):
+                    token = None
+                    bot_dir = f"{slot_dir}/bot"
+                    if os.path.exists(bot_dir):
+                        token = find_bot_token_in_dir(bot_dir)
+                    process_key = f"{user_id}_{slot}"
+                    if process_key in running_bots:
+                        try:
+                            running_bots[process_key].terminate()
+                        except:
+                            pass
+                        del running_bots[process_key]
+                    shutil.rmtree(slot_dir, ignore_errors=True)
+                    if token:
+                        remove_used_token(token)
+                    else:
+                        remove_user_tokens(user_id, slot)
+                return await message.reply("✅ تم حذف التنصيب بنجاح.")
+            else:
+                state["step"] = "WAITING_SLOT_DELETE"
+                return await message.reply("لديك أكثر من تنصيب، أدخل الرقم الذي تريد حذفه:")
+
+        elif text in ["قسم الإدارة", "إدارة بوتك"]:
+            state["target_id"] = user_id
+            state["mode"] = None
+            slots = get_active_slots(user_id)
+            if not slots:
+                return await message.reply("لا يوجد تنصيبات حالياً لإدارتها.")
+            if len(slots) == 1:
+                state["selected_slot"] = slots[0]
+                return await message.reply(f"تم اختيار التنصيب التلقائي ({slots[0]}). اختر الإجراء:", reply_markup=manage_menu())
+            else:
+                state["step"] = "WAITING_SLOT_MANAGE"
+                return await message.reply("أدخل رقم التنصيب الذي تريد إدارته:")
+
+        elif text == "المنصبين" and user_id == ADMIN_ID:
+            if not os.path.exists("hostings") or not os.listdir("hostings"):
+                return await message.reply("لا يوجد أي تنصيبات حالياً.")
+            msg = "📋 **قائمة المنصبين:**\n\n"
+            count = 1
             for uid in os.listdir("hostings"):
                 user_path = os.path.join("hostings", uid)
                 if os.path.isdir(user_path):
                     for slot_dir in os.listdir(user_path):
                         if slot_dir.startswith("slot_"):
-                            active_installations += 1
-        total, used, free = shutil.disk_usage("/")
-        disk_percent = (used / total) * 100
-        report = (
-            "📊 **تقرير الإحصائيات المفصل:**\n\n"
-            f"👥 **المستخدمين المسجلين:** `{total_users}`\n"
-            f"🤖 **إجمالي التنصيبات:** `{active_installations}`\n"
-            f"⚡ **البوتات الشغالة حالياً:** `{len(get_all_running())}`\n"
-            f"💾 **مساحة السيرفر:** `{disk_percent:.1f}%`"
-        )
-        return await message.reply(report)
+                            slot_num = slot_dir.split("_")[1]
+                            bot_dir = f"{user_path}/{slot_dir}/bot"
+                            script_path = find_main_script(bot_dir)
+                            file_name = os.path.basename(script_path) if script_path else "غير معروف"
+                            msg += f"**{count}-**\n"
+                            msg += f"👤 **الآيدي:** `{uid}`\n"
+                            msg += f"📦 **رقم التنصيب:** `{slot_num}`\n"
+                            msg += f"📄 **الملف الرئيسي:** `{file_name}`\n"
+                            msg += "──────────────\n"
+                            count += 1
+            if count == 1:
+                return await message.reply("لا يوجد أي تنصيبات حالياً.")
+            return await message.reply(msg)
 
-    elif text in ["إدارة تنصيب عضو", "حذف تنصيب عضو", "إيقاف مؤقت لعضو", "تشغيل لعضو"] and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_WAITING_USER_ID"
-        state["action"] = text
-        return await message.reply("أدخل الآيدي (ID) الخاص بالعضو:")
+        elif text == "جلب نسخة احتياطية" and user_id == ADMIN_ID:
+            msg = await message.reply("⏳ جاري تحضير النسخة الاحتياطية...")
+            backup_name = "Backup.zip"
+            try:
+                with zipfile.ZipFile(backup_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    if os.path.exists("database.json"):
+                        zipf.write("database.json")
+                    if os.path.exists("hostings"):
+                        for root, _, files in os.walk("hostings"):
+                            for file in files:
+                                zipf.write(os.path.join(root, file))
+                await message.reply_document(backup_name, caption="📦 النسخة الاحتياطية الخاصة بك جاهزة.")
+                os.remove(backup_name)
+                await msg.delete()
+            except Exception as e:
+                await msg.edit_text(f"❌ حدث خطأ أثناء تجهيز النسخة: {e}")
 
-    elif text == "فك حظر" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_UNBAN_ID"
-        return await message.reply("أدخل الآيدي لفك الحظر:")
+        elif text == "رفع نسخة احتياطية" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_WAITING_BACKUP"
+            return await message.reply("أرسل ملف النسخة الاحتياطية (`.zip`) الآن:\n⚠️ **تحذير:** رفع النسخة سيقوم بإيقاف البوتات الشغالة واستبدال الملفات ثم إعادة تشغيلهم تلقائياً.")
 
-    elif text == "زيادة تنصيب" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_ADD_LIMIT"
-        return await message.reply("أدخل الآيدي لزيادة الحد:")
+        elif text == "إدارة بوتات الأعضاء" and user_id == ADMIN_ID:
+            return await message.reply("إدارة الأعضاء:", reply_markup=admin_users_menu())
 
-    elif text == "قفل التنصيب" and user_id == ADMIN_ID:
-        db["locked"] = True
-        save_db(db)
-        return await message.reply("🔒 تم قفل التنصيب.")
+        elif text == "الإحصائيات والتقرير" and user_id == ADMIN_ID:
+            total_users = len(db["users"])
+            active_installations = 0
+            if os.path.exists("hostings"):
+                for uid in os.listdir("hostings"):
+                    user_path = os.path.join("hostings", uid)
+                    if os.path.isdir(user_path):
+                        for slot_dir in os.listdir(user_path):
+                            if slot_dir.startswith("slot_"):
+                                active_installations += 1
+            total, used, free = shutil.disk_usage("/")
+            disk_percent = (used / total) * 100
+            report = (
+                "📊 **تقرير الإحصائيات المفصل:**\n\n"
+                f"👥 **المستخدمين المسجلين:** `{total_users}`\n"
+                f"🤖 **إجمالي التنصيبات:** `{active_installations}`\n"
+                f"⚡ **البوتات الشغالة حالياً:** `{len(get_all_running())}`\n"
+                f"💾 **مساحة السيرفر:** `{disk_percent:.1f}%`"
+            )
+            return await message.reply(report)
 
-    elif text == "تشغيل التنصيب" and user_id == ADMIN_ID:
-        db["locked"] = False
-        save_db(db)
-        return await message.reply("🔓 تم فتح التنصيب.")
+        elif text in ["إدارة تنصيب عضو", "حذف تنصيب عضو", "إيقاف مؤقت لعضو", "تشغيل لعضو"] and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_WAITING_USER_ID"
+            state["action"] = text
+            return await message.reply("أدخل الآيدي (ID) الخاص بالعضو:")
 
-    elif text == "رفع عضو VIP" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_VIP_ADD_ID"
-        return await message.reply("أدخل آيدي العضو لرفعه VIP:")
+        elif text == "فك حظر" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_UNBAN_ID"
+            return await message.reply("أدخل الآيدي لفك الحظر:")
 
-    elif text == "تنزيل عضو VIP" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_VIP_REMOVE_ID"
-        return await message.reply("أدخل آيدي العضو لتنزيله من VIP:")
+        elif text == "زيادة تنصيب" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_ADD_LIMIT"
+            return await message.reply("أدخل الآيدي لزيادة الحد:")
 
-    elif text == "عرض الأعضاء VIP" and user_id == ADMIN_ID:
-        vip_data = db.get("vip", {})
-        if not vip_data:
-            return await message.reply("لا يوجد أعضاء VIP حالياً.")
-        msg = "🌟 **قائمة الأعضاء VIP:**\n\n"
-        for uid, expiry in vip_data.items():
-            if expiry > time.time():
-                remaining = int((expiry - time.time()) / 86400)
-                msg += f"👤 **العضو:** `{uid}`\n⏳ **متبقي:** `{remaining}` يوم\n──────────────\n"
-        if msg == "🌟 **قائمة الأعضاء VIP:**\n\n":
-            return await message.reply("لا يوجد أعضاء VIP صالحين حالياً.")
-        return await message.reply(msg)
+        elif text == "قفل التنصيب" and user_id == ADMIN_ID:
+            db["locked"] = True
+            save_db(db)
+            return await message.reply("🔒 تم قفل التنصيب.")
 
-    elif text == "المستخدمين" and user_id == ADMIN_ID:
-        users = db.get("users", {})
-        user_details = db.get("user_details", {})
-        if not users:
-            return await message.reply("لا يوجد مستخدمين مسجلين.")
-        msg = "📋 **قائمة المستخدمين:**\n\n"
-        for uid in users:
-            details = user_details.get(uid, {})
-            name = details.get("name", "غير معروف")
-            username = details.get("username", "")
-            if username:
-                user_link = f"[{name}](tg://openmessage?user_id={uid})"
-                display = f"{user_link} (@{username})"
-            else:
-                user_link = f"[{name}](tg://openmessage?user_id={uid})"
-                display = f"{user_link} (لا يوجد يوزر)"
-            msg += f"🆔 `{uid}` - {display}\n"
-        if len(msg) > 4000:
-            for x in range(0, len(msg), 4000):
-                await message.reply(msg[x:x+4000])
-        else:
-            await message.reply(msg)
-        return
+        elif text == "تشغيل التنصيب" and user_id == ADMIN_ID:
+            db["locked"] = False
+            save_db(db)
+            return await message.reply("🔓 تم فتح التنصيب.")
 
-    elif text == "حظر عضو" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_WAITING_BAN_ID"
-        return await message.reply("أدخل الآيدي (ID) الخاص بالعضو لحظره:")
+        elif text == "رفع عضو VIP" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_VIP_ADD_ID"
+            return await message.reply("أدخل آيدي العضو لرفعه VIP:")
 
-    elif text == "الغاء حظر عضو" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_UNBAN_ID"
-        return await message.reply("أدخل الآيدي (ID) الخاص بالعضو لإلغاء حظره:")
+        elif text == "تنزيل عضو VIP" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_VIP_REMOVE_ID"
+            return await message.reply("أدخل آيدي العضو لتنزيله من VIP:")
 
-    elif text == "اذاعه لجميع الاعضاء" and user_id == ADMIN_ID:
-        state["step"] = "ADMIN_WAITING_BROADCAST_MSG"
-        return await message.reply("أدخل الرسالة التي تريد إرسالها لجميع المستخدمين:")
+        elif text == "عرض الأعضاء VIP" and user_id == ADMIN_ID:
+            vip_data = db.get("vip", {})
+            if not vip_data:
+                return await message.reply("لا يوجد أعضاء VIP حالياً.")
+            msg = "🌟 **قائمة الأعضاء VIP:**\n\n"
+            for uid, expiry in vip_data.items():
+                if expiry > time.time():
+                    remaining = int((expiry - time.time()) / 86400)
+                    msg += f"👤 **العضو:** `{uid}`\n⏳ **متبقي:** `{remaining}` يوم\n──────────────\n"
+            if msg == "🌟 **قائمة الأعضاء VIP:**\n\n":
+                return await message.reply("لا يوجد أعضاء VIP صالحين حالياً.")
+            return await message.reply(msg)
 
-    # ========== SCREEN MANAGEMENT ==========
-    elif text == "عرض الاسكرينات" and user_id == ADMIN_ID:
-        all_procs = get_all_running()
-        if not all_procs:
-            return await message.reply("لا توجد أي اسكرينات (بوتات) شغالة حالياً.")
-        msg = "📋 **قائمة الاسكرينات الشغالة:**\n\n"
-        idx = 1
-        for key, proc in all_procs.items():
-            if proc.poll() is None:
-                if key.startswith("root_"):
-                    bot_name = key[5:]
-                    msg += f"{idx}. 🌱 **جذري** `{bot_name}`\n"
+        elif text == "المستخدمين" and user_id == ADMIN_ID:
+            users = db.get("users", {})
+            user_details = db.get("user_details", {})
+            if not users:
+                return await message.reply("لا يوجد مستخدمين مسجلين.")
+            msg = "📋 **قائمة المستخدمين:**\n\n"
+            for uid in users:
+                details = user_details.get(uid, {})
+                name = details.get("name", "غير معروف")
+                username = details.get("username", "")
+                if username:
+                    user_link = f"[{name}](tg://openmessage?user_id={uid})"
+                    display = f"{user_link} (@{username})"
                 else:
-                    user_id_key, slot = key.split('_')
-                    msg += f"{idx}. 👤 `{user_id_key}` | 📦 رقم {slot}\n"
-                idx += 1
-        if idx == 1:
-            return await message.reply("لا توجد أي اسكرينات شغالة.")
-        return await message.reply(msg)
+                    user_link = f"[{name}](tg://openmessage?user_id={uid})"
+                    display = f"{user_link} (لا يوجد يوزر)"
+                msg += f"🆔 `{uid}` - {display}\n"
+            if len(msg) > 4000:
+                for x in range(0, len(msg), 4000):
+                    await message.reply(msg[x:x+4000])
+            else:
+                await message.reply(msg)
+            return
 
-    elif text == "ايقاف اسكرين" and user_id == ADMIN_ID:
-        all_procs = get_all_running()
-        if not all_procs:
-            return await message.reply("لا توجد اسكرينات شغالة.")
-        state["step"] = "SCREEN_WAITING_NUMBER"
-        return await message.reply("أدخل رقم الاسكرين (من قائمة العرض) الذي تريد إيقافه:")
+        elif text == "حظر عضو" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_WAITING_BAN_ID"
+            return await message.reply("أدخل الآيدي (ID) الخاص بالعضو لحظره:")
 
-    if step == "SCREEN_WAITING_NUMBER" and user_id == ADMIN_ID:
-        if not text.isdigit():
-            return await message.reply("الرجاء إدخال رقم صحيح.")
-        idx = int(text)
-        all_procs = get_all_running()
-        proc_keys = list(all_procs.keys())
-        if idx < 1 or idx > len(proc_keys):
-            return await message.reply("رقم غير موجود. استخدم الأرقام المعروضة.")
-        key = proc_keys[idx-1]
-        proc = all_procs[key]
-        if proc.poll() is not None:
-            # Remove from dicts
+        elif text == "الغاء حظر عضو" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_UNBAN_ID"
+            return await message.reply("أدخل الآيدي (ID) الخاص بالعضو لإلغاء حظره:")
+
+        elif text == "اذاعه لجميع الاعضاء" and user_id == ADMIN_ID:
+            state["step"] = "ADMIN_WAITING_BROADCAST_MSG"
+            return await message.reply("أدخل الرسالة التي تريد إرسالها لجميع المستخدمين:")
+
+        # ----- SCREEN MANAGEMENT -----
+        elif text == "عرض الاسكرينات" and user_id == ADMIN_ID:
+            all_procs = get_all_running()
+            if not all_procs:
+                return await message.reply("لا توجد أي اسكرينات (بوتات) شغالة حالياً.")
+            msg = "📋 **قائمة الاسكرينات الشغالة:**\n\n"
+            idx = 1
+            for key, proc in all_procs.items():
+                if proc.poll() is None:
+                    if key.startswith("root_"):
+                        bot_name = key[5:]
+                        msg += f"{idx}. 🌱 **جذري** `{bot_name}`\n"
+                    else:
+                        user_id_key, slot = key.split('_')
+                        msg += f"{idx}. 👤 `{user_id_key}` | 📦 رقم {slot}\n"
+                    idx += 1
+            if idx == 1:
+                return await message.reply("لا توجد أي اسكرينات شغالة.")
+            return await message.reply(msg)
+
+        elif text == "ايقاف اسكرين" and user_id == ADMIN_ID:
+            all_procs = get_all_running()
+            if not all_procs:
+                return await message.reply("لا توجد اسكرينات شغالة.")
+            state["step"] = "SCREEN_WAITING_NUMBER"
+            return await message.reply("أدخل رقم الاسكرين (من قائمة العرض) الذي تريد إيقافه:")
+
+        if step == "SCREEN_WAITING_NUMBER" and user_id == ADMIN_ID:
+            if not text.isdigit():
+                return await message.reply("الرجاء إدخال رقم صحيح.")
+            idx = int(text)
+            all_procs = get_all_running()
+            proc_keys = list(all_procs.keys())
+            if idx < 1 or idx > len(proc_keys):
+                return await message.reply("رقم غير موجود. استخدم الأرقام المعروضة.")
+            key = proc_keys[idx-1]
+            proc = all_procs[key]
+            if proc.poll() is not None:
+                if key in running_bots:
+                    del running_bots[key]
+                elif key in root_bots:
+                    del root_bots[key]
+                return await message.reply("هذه الاسكرين متوقفة بالفعل.")
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except:
+                proc.kill()
             if key in running_bots:
                 del running_bots[key]
             elif key in root_bots:
                 del root_bots[key]
-            return await message.reply("هذه الاسكرين متوقفة بالفعل.")
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except:
-            proc.kill()
-        if key in running_bots:
-            del running_bots[key]
-        elif key in root_bots:
-            del root_bots[key]
-        await message.reply(f"✅ تم إيقاف الاسكرين رقم {idx} بنجاح.")
-        state["step"] = None
-        return
+            await message.reply(f"✅ تم إيقاف الاسكرين رقم {idx} بنجاح.")
+            state["step"] = None
+            return
 
-    elif text == "ايقاف جميع الاسكرينات" and user_id == ADMIN_ID:
-        all_procs = get_all_running()
-        if not all_procs:
-            return await message.reply("لا توجد اسكرينات شغالة.")
-        stopped = 0
-        for key, proc in list(all_procs.items()):
-            if proc.poll() is None:
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-                except:
-                    proc.kill()
-                stopped += 1
-            if key in running_bots:
-                del running_bots[key]
-            elif key in root_bots:
-                del root_bots[key]
-        await message.reply(f"✅ تم إيقاف جميع الاسكرينات ({stopped} بوت).")
-        return
+        elif text == "ايقاف جميع الاسكرينات" and user_id == ADMIN_ID:
+            all_procs = get_all_running()
+            if not all_procs:
+                return await message.reply("لا توجد اسكرينات شغالة.")
+            stopped = 0
+            for key, proc in list(all_procs.items()):
+                if proc.poll() is None:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=3)
+                    except:
+                        proc.kill()
+                    stopped += 1
+                if key in running_bots:
+                    del running_bots[key]
+                elif key in root_bots:
+                    del root_bots[key]
+            await message.reply(f"✅ تم إيقاف جميع الاسكرينات ({stopped} بوت).")
+            return
 
-    # ========== REGULAR BOT MANAGEMENT ACTIONS (non-root) ==========
-    # Only proceed if not in root mode
-    if mode != "root_bot_manage":
-        if text == "تثبيت مكتب":
+        # ----- Regular bot management actions (non‑root) -----
+        elif text == "تثبيت مكتب":
             slot = state.get("selected_slot")
             target_id = state.get("target_id", user_id)
             if not slot:
@@ -1150,7 +1177,19 @@ async def handle_texts(client: Client, message: Message):
             state["step"] = "WAITING_COMMAND"
             state["target_id"] = target_id
             state["selected_slot"] = slot
-            return await message.reply("أدخل الأمر الذي تريد تنفيذه (مثل: `pip install requests` أو `pip install -r requirements.txt`):")
+            state["mode"] = None
+            return await message.reply("أدخل أمر التثبيت (مثل: `pip install requests`):")
+
+        elif text == "تنفيذ أمر":
+            slot = state.get("selected_slot")
+            target_id = state.get("target_id", user_id)
+            if not slot:
+                return await message.reply("يرجى اختيار التنصيب أولاً.", reply_markup=main_menu(user_id))
+            state["step"] = "WAITING_COMMAND"
+            state["target_id"] = target_id
+            state["selected_slot"] = slot
+            state["mode"] = None
+            return await message.reply("أدخل الأمر الذي تريد تنفيذه في هذا البوت:\n(مثل: `ls -la`)")
 
         elif text in ["سجل البوت", "حالة البوت", "إيقاف مؤقت", "تشغيل البوت", "⌨️ إدخال بيانات", "📂 إدارة الملفات", "🔄 إعادة تشغيل"]:
             slot = state.get("selected_slot")
@@ -1238,7 +1277,6 @@ async def handle_texts(client: Client, message: Message):
                 return await message.reply("أهلاً بك في قسم إدارة الملفات:", reply_markup=file_manage_menu())
 
         elif text in ["📄 عرض الملفات", "📁 دخول مجلد", "➕ إضافة ملف", "🔄 تبديل ملف", "🗑 حذف ملف", "🔙 المجلد السابق"]:
-            # Existing file management for hosting bots
             current_dir = state.get("current_dir")
             if not current_dir or not os.path.exists(current_dir):
                 return await message.reply("الرجاء الدخول لإدارة الملفات أولاً.", reply_markup=manage_menu())
@@ -1283,8 +1321,8 @@ async def handle_texts(client: Client, message: Message):
                 state["step"] = "WAITING_REPLACE_FILE"
                 return await message.reply("أرسل الملف الجديد الآن.\n⚠️ **ملاحظة:** يجب أن يكون اسم الملف المرسل هو نفس اسم الملف الموجود في المجلد ليتم استبداله.")
 
-    # If nothing matched
-    await message.reply("أمر غير معروف، استخدم الأزرار من القائمة.", reply_markup=main_menu(user_id))
+    # If we reach here, nothing matched
+    await message.reply("أمر غير معروف، استخدم الأزرار.", reply_markup=main_menu(user_id))
 
 async def execute_admin_user_action(message, action, target_id, slot):
     process_key = f"{target_id}_{slot}"
@@ -1293,6 +1331,7 @@ async def execute_admin_user_action(message, action, target_id, slot):
     if action == "إدارة تنصيب عضو":
         user_states[message.from_user.id]["target_id"] = target_id
         user_states[message.from_user.id]["selected_slot"] = slot
+        user_states[message.from_user.id]["mode"] = None
         await message.reply(f"تم الدخول بنجاح لإدارة التنصيب ({slot}) للعضو ({target_id}).", reply_markup=manage_menu())
 
     elif action == "حذف تنصيب عضو":
@@ -1351,7 +1390,6 @@ async def handle_docs(client: Client, message: Message):
         msg = await message.reply(f"⏳ جاري رفع الملف `{file_name}` إلى `/root`...")
         downloaded = await message.download()
         if file_name.endswith(".zip"):
-            # Extract to /root/{name_without_ext}
             folder_name = os.path.splitext(file_name)[0]
             extract_to = os.path.join("/root", folder_name)
             if os.path.exists(extract_to):
@@ -1367,7 +1405,6 @@ async def handle_docs(client: Client, message: Message):
                         os.chmod(os.path.join(root, f), 0o644)
                 os.remove(downloaded)
                 await msg.edit_text(f"✅ تم فك ضغط الملف `{file_name}` في `/root/{folder_name}` بنجاح.")
-                # Check if it's a bot
                 if find_main_script(extract_to) is not None:
                     await message.reply("💡 هذا المجلد يحتوي على بوت، يمكنك إدارته من 'إدارة بوت جذري'.")
             except Exception as e:
@@ -1375,7 +1412,6 @@ async def handle_docs(client: Client, message: Message):
                 os.remove(downloaded)
                 await msg.edit_text(f"❌ فشل فك الضغط: {e}")
         else:
-            # Direct file
             target_path = os.path.join("/root", file_name)
             if os.path.exists(target_path):
                 os.remove(downloaded)
@@ -1429,7 +1465,6 @@ async def handle_docs(client: Client, message: Message):
                                     )
                                     running_bots[f"{uid}_{slot_num}"] = p
                                     restarted_count += 1
-            # Also restore root bots if any? Not in backup, but we can leave.
             user_states[user_id]["step"] = None
             await msg.edit_text(f"✅ تم استعادة النسخة الاحتياطية بنجاح!\n🤖 تم إعادة تشغيل {restarted_count} بوت تلقائياً.")
         except Exception as e:
